@@ -9,6 +9,7 @@ import net.corda.core.contracts.Command
 import net.corda.core.contracts.CommandData
 import net.corda.core.contracts.ContractState
 import net.corda.core.contracts.TransactionType
+import net.corda.core.crypto.CompositeSignatureData
 import net.corda.core.crypto.NullSignature
 import net.corda.core.testing.*
 import net.corda.core.transactions.SignedTransaction
@@ -84,7 +85,7 @@ class SignedTransactionGenerator : Generator<SignedTransaction>(SignedTransactio
         val wireTransaction = WiredTransactionGenerator().generate(random, status)
         return SignedTransaction(
                 txBits = wireTransaction.serialized,
-                sigs = listOf(NullSignature)
+                compositeSig = CompositeSignatureData(listOf(NullSignature))
         )
     }
 }

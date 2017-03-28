@@ -3,6 +3,7 @@ package net.corda.core.transactions
 import net.corda.core.contracts.AttachmentResolutionException
 import net.corda.core.contracts.NamedByHash
 import net.corda.core.contracts.TransactionResolutionException
+import net.corda.core.crypto.*
 import net.corda.core.node.ServiceHub
 import net.corda.core.crypto.DigitalSignature
 import net.corda.core.crypto.SecureHash
@@ -29,16 +30,20 @@ import java.util.*
  * sign.
  */
 data class SignedTransaction(val txBits: SerializedBytes<WireTransaction>,
-                             val sigs: List<DigitalSignature.WithKey>
+                             // TODO: Remove duplicate signer information between the wire transaction and signature
+                             val compositeSig: CompositeSignatureData
 ) : NamedByHash {
-    init {
-        require(sigs.isNotEmpty())
-    }
+    constructor(txBits: SerializedBytes<WireTransaction>,
+                sigs: List<DigitalSignature.WithKey>) : this(txBits, CompositeSignatureData(sigs))
 
+    init {
+        require(compositeSig.sigs.isNotEmpty())
+    }
     // TODO: This needs to be reworked to ensure that the inner WireTransaction is only ever deserialised sandboxed.
 
     /** Lazily calculated access to the deserialised/hashed transaction data. */
     val tx: WireTransaction by lazy { WireTransaction.deserialize(txBits) }
+    val sigs: List<DigitalSignature.WithKey> = compositeSig.sigs
 
     /**
      * The Merkle root of the inner [WireTransaction]. Note that this is _not_ the same as the simple hash of
@@ -122,10 +127,10 @@ data class SignedTransaction(val txBits: SerializedBytes<WireTransaction>,
     }
 
     /** Returns the same transaction but with an additional (unchecked) signature. */
-    fun withAdditionalSignature(sig: DigitalSignature.WithKey) = copy(sigs = sigs + sig)
+    fun withAdditionalSignature(sig: DigitalSignature.WithKey) = copy(compositeSig = compositeSig.copy(sigs = compositeSig.sigs + sig))
 
     /** Returns the same transaction but with an additional (unchecked) signatures. */
-    fun withAdditionalSignatures(sigList: Iterable<DigitalSignature.WithKey>) = copy(sigs = sigs + sigList)
+    fun withAdditionalSignatures(sigList: Iterable<DigitalSignature.WithKey>) = copy(compositeSig = compositeSig.copy(sigs = compositeSig.sigs + sigList))
 
     /** Alias for [withAdditionalSignature] to let you use Kotlin operator overloading. */
     operator fun plus(sig: DigitalSignature.WithKey) = withAdditionalSignature(sig)
