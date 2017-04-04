@@ -36,9 +36,7 @@ val dummyNotarisationTest = LoadTest<NotariseCommand, Unit>(
                     NotariseCommand(issueTx.toSignedTransaction(false), moveTx.toSignedTransaction(false), node)
                 }
             }
-            Generator.replicate(10, generateTx).bind {
-                Generator.sequence(listOf(generateTx))
-            }
+            Generator.replicate(10, generateTx)
         },
         interpret = { _, _ -> },
         execute = { (issueTx, moveTx, node) ->
