@@ -120,7 +120,7 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
             }
 
             if (gatheredAmount < amount) {
-                log.trace("Insufficient balance: requested $amount, available $gatheredAmount (total balance ${cashBalances[amount.token]})")
+                log.trace { "Insufficient balance: requested $amount, available $gatheredAmount" }
                 throw InsufficientBalanceException(amount - gatheredAmount)
             }
 
