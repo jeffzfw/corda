@@ -34,7 +34,7 @@ class InteractiveShellTest {
     }
 
     private val someCorpLegalName = MEGA_CORP.name
-    private val ids = InMemoryIdentityService().apply { registerIdentity(Party(MEGA_CORP.name, DUMMY_PUBKEY_1)) }
+    private val ids = InMemoryIdentityService().apply { registerIdentity(Party(someCorpLegalName, DUMMY_PUBKEY_1)) }
     private val om = JacksonSupport.createInMemoryMapper(ids, YAMLFactory())
 
     private fun check(input: String, expected: String) {
@@ -67,7 +67,7 @@ class InteractiveShellTest {
     fun flowTooManyParams() = check("b: 12, c: Yo, d: Bar", "")
 
     @Test
-    fun party() = check("party: \"${someCorpLegalName}\"", someCorpLegalName)
+    fun party() = check("party: \"${someCorpLegalName}\"", someCorpLegalName.toString())
 
     class DummyFSM(val logic: FlowA) : FlowStateMachine<Any?> {
         override fun <T : Any> sendAndReceive(receiveType: Class<T>, otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>): UntrustworthyData<T> {
