@@ -17,6 +17,7 @@ import net.corda.core.utilities.loggerFor
 import net.corda.flows.IssuerFlow.IssuanceRequester
 import net.corda.testing.BOC
 import net.corda.traderdemo.flow.SellerFlow
+import org.bouncycastle.asn1.x500.X500Name
 import java.util.*
 import kotlin.test.assertEquals
 
@@ -35,7 +36,7 @@ class TraderDemoClientApi(val rpc: CordaRPCOps) {
     val commercialPaperCount: Int get() = rpc.vaultAndUpdates().first.filterStatesOfType<CommercialPaper.State>().size
 
     fun runBuyer(amount: Amount<Currency> = 30000.DOLLARS) {
-        val bankOfCordaParty = rpc.partyFromName(BOC.name)
+        val bankOfCordaParty = rpc.partyFromX500Name(BOC.name)
                 ?: throw Exception("Unable to locate ${BOC.name} in Network Map Service")
         val me = rpc.nodeIdentity()
         val amounts = calculateRandomlySizedAmounts(amount, 3, 10, Random())
@@ -47,8 +48,8 @@ class TraderDemoClientApi(val rpc: CordaRPCOps) {
         Futures.allAsList(resultFutures).getOrThrow()
     }
 
-    fun runSeller(amount: Amount<Currency> = 1000.0.DOLLARS, counterparty: String) {
-        val otherParty = rpc.partyFromName(counterparty) ?: throw IllegalStateException("Don't know $counterparty")
+    fun runSeller(amount: Amount<Currency> = 1000.0.DOLLARS, counterparty: X500Name) {
+        val otherParty = rpc.partyFromX500Name(counterparty) ?: throw IllegalStateException("Don't know $counterparty")
         // The seller will sell some commercial paper to the buyer, who will pay with (self issued) cash.
         //
         // The CP sale transaction comes with a prospectus PDF, which will tag along for the ride in an

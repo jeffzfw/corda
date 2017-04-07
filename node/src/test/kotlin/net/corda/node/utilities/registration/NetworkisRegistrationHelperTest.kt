@@ -8,6 +8,7 @@ import net.corda.core.crypto.X509Utilities
 import net.corda.core.exists
 import net.corda.core.utilities.ALICE
 import net.corda.testing.TestNodeConfiguration
+import org.bouncycastle.asn1.x500.X500Name
 import org.junit.Rule
 import org.junit.Test
 import org.junit.rules.TemporaryFolder
@@ -24,9 +25,9 @@ class NetworkRegistrationHelperTest {
     fun buildKeyStore() {
         val id = SecureHash.randomSHA256().toString()
 
-        val certs = arrayOf(X509Utilities.createSelfSignedCACert("CORDA_CLIENT_CA").certificate,
-                X509Utilities.createSelfSignedCACert("CORDA_INTERMEDIATE_CA").certificate,
-                X509Utilities.createSelfSignedCACert("CORDA_ROOT_CA").certificate)
+        val certs = arrayOf(X509Utilities.createSelfSignedCACert(X500Name("CN=CORDA_CLIENT_CA,O=R3,OU=corda,L=London,C=UK")).certificate,
+                X509Utilities.createSelfSignedCACert(X500Name("CORDA_INTERMEDIATE_CA,O=R3,OU=corda,L=London,C=UK")).certificate,
+                X509Utilities.createSelfSignedCACert(X500Name("CORDA_ROOT_CA,O=R3,OU=corda,L=London,C=UK")).certificate)
 
         val certService: NetworkRegistrationService = mock {
             on { submitRequest(any()) }.then { id }

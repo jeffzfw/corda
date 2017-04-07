@@ -5,7 +5,6 @@ import net.corda.core.contracts.StateAndRef
 import net.corda.core.contracts.StateRef
 import net.corda.core.contracts.TransactionType
 import net.corda.core.crypto.Party
-import net.corda.core.div
 import net.corda.core.getOrThrow
 import net.corda.core.node.services.ServiceInfo
 import net.corda.core.node.services.ServiceType
@@ -19,6 +18,7 @@ import net.corda.node.services.transactions.BFTNonValidatingNotaryService
 import net.corda.node.utilities.ServiceIdentityGenerator
 import net.corda.node.utilities.transaction
 import net.corda.testing.node.NodeBasedTest
+import org.bouncycastle.asn1.x500.X500Name
 import org.junit.Test
 import java.security.KeyPair
 import java.util.*
@@ -26,14 +26,15 @@ import kotlin.test.assertEquals
 import kotlin.test.assertFailsWith
 
 class BFTNotaryServiceTests : NodeBasedTest() {
-    private val notaryName = "BFT Notary Server"
+    private val notaryCommonName = "BFT Notary Server"
 
     @Test
     fun `detect double spend`() {
-        val masterNode = startBFTNotaryCluster(notaryName, 4, BFTNonValidatingNotaryService.type).first()
+        val notaryLegalName = X500Name("CN=${notaryCommonName},O=R3,OU=corda,L=London,C=UK")
+        val (masterNode, allNodes) = startBFTNotaryCluster(notaryLegalName, 4, BFTNonValidatingNotaryService.type)
         val alice = startNode(ALICE.name).getOrThrow()
 
-        val notaryParty = alice.netMapCache.getNotary(notaryName)!!
+        val notaryParty = alice.netMapCache.getNotary(notaryLegalName)!!
         val notaryNodeKeyPair = with(masterNode) { database.transaction { services.notaryIdentityKey } }
         val aliceKey = with(alice) { database.transaction { services.legalIdentityKey } }
 
@@ -71,9 +72,9 @@ class BFTNotaryServiceTests : NodeBasedTest() {
         }
     }
 
-    private fun startBFTNotaryCluster(notaryName: String,
+    private fun startBFTNotaryCluster(notaryName: X500Name,
                                       clusterSize: Int,
-                                      serviceType: ServiceType): List<Node> {
+                                      serviceType: ServiceType): Pair<Node, List<Node>> {
         val quorum = (2 * clusterSize + 1) / 3
         ServiceIdentityGenerator.generateToDisk(
                 (0 until clusterSize).map { tempFolder.root.toPath() / "$notaryName-$it" },
@@ -83,19 +84,19 @@ class BFTNotaryServiceTests : NodeBasedTest() {
 
         val serviceInfo = ServiceInfo(serviceType, notaryName)
         val masterNode = startNode(
-                "$notaryName-0",
+                X500Name("CN=${notaryName}-0,O=R3,OU=corda,L=London,C=UK"),
                 advertisedServices = setOf(serviceInfo),
                 configOverrides = mapOf("notaryNodeId" to 0)
         ).getOrThrow()
 
         val remainingNodes = (1 until clusterSize).map {
             startNode(
-                    "$notaryName-$it",
+                    X500Name("CN=${notaryName}-$it,O=R3,OU=corda,L=London,C=UK"),
                     advertisedServices = setOf(serviceInfo),
                     configOverrides = mapOf("notaryNodeId" to it)
             ).getOrThrow()
         }
 
-        return remainingNodes + masterNode
+        return Pair(masterNode, remainingNodes + masterNode)
     }
 }
