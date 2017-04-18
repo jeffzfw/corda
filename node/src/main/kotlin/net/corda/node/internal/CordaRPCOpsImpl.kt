@@ -4,8 +4,8 @@ import net.corda.core.contracts.Amount
 import net.corda.core.contracts.ContractState
 import net.corda.core.contracts.StateAndRef
 import net.corda.core.contracts.UpgradedContract
-import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
+import net.corda.core.flows.CommunicationInitiator
 import net.corda.core.flows.FlowLogic
 import net.corda.core.flows.StateMachineRunId
 import net.corda.core.messaging.CordaRPCOps
@@ -25,6 +25,7 @@ import net.corda.node.services.statemachine.StateMachineManager
 import net.corda.node.utilities.AddOrRemove
 import net.corda.node.utilities.transaction
 import org.bouncycastle.asn1.x500.X500Name
+import net.corda.nodeapi.CURRENT_RPC_USER
 import org.jetbrains.exposed.sql.Database
 import rx.Observable
 import java.io.InputStream
@@ -103,7 +104,8 @@ class CordaRPCOpsImpl(
     // TODO: Check that this flow is annotated as being intended for RPC invocation
     override fun <T : Any> startFlowDynamic(logicType: Class<out FlowLogic<T>>, vararg args: Any?): FlowHandle<T> {
         requirePermission(startFlowPermission(logicType))
-        val stateMachine = services.invokeFlowAsync(logicType, *args) as FlowStateMachineImpl<T>
+        val currentUser = CommunicationInitiator.Rpc(CURRENT_RPC_USER.get().username)
+        val stateMachine = services.invokeFlowAsync(logicType, currentUser, *args) as FlowStateMachineImpl<T>
         return FlowHandle(
                 id = stateMachine.id,
                 progress = stateMachine.logic.track()?.second ?: Observable.empty(),
@@ -152,7 +154,7 @@ class CordaRPCOpsImpl(
 
     companion object {
         private fun stateMachineInfoFromFlowLogic(id: StateMachineRunId, flowLogic: FlowLogic<*>): StateMachineInfo {
-            return StateMachineInfo(id, flowLogic.javaClass.name, flowLogic.track())
+            return StateMachineInfo(id, flowLogic.javaClass.name, flowLogic.communicationInitiator ,flowLogic.track())
         }
 
         private fun stateMachineUpdateFromStateMachineChange(change: StateMachineManager.Change): StateMachineUpdate {
