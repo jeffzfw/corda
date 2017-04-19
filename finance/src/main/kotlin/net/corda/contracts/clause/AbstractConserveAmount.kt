@@ -107,11 +107,6 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
             // What if we already have a move command with the right keys? Filter it out here or in platform code?
             tx.addCommand(Cash().generateMoveCommand(), keysUsed)
 
-            // update Vault
-            //        notify(tx.toWireTransaction())
-            // Vault update must be completed AFTER transaction is recorded to ledger storage!!!
-            // (this is accomplished within the recordTransaction function)
-
             return Pair(tx, keysUsed)
         }
 
