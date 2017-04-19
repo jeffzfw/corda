@@ -3,8 +3,6 @@ package net.corda.contracts.clause
 import net.corda.contracts.asset.Cash
 import net.corda.core.contracts.*
 import net.corda.core.contracts.clauses.Clause
-import net.corda.core.crypto.AbstractParty
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.transactions.TransactionBuilder
 import java.security.PublicKey
 import net.corda.core.utilities.loggerFor
@@ -21,12 +19,29 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
     companion object {
         val log = loggerFor<AbstractConserveAmount<*, *, *>>()
 
+        /**
+         * Generate a transaction that moves an amount of currency to the given pubkey.
+         *
+         * Note: an [Amount] of [Currency] is only fungible for a given Issuer Party within a [FungibleAsset]
+         *
+         * @param tx A builder, which may contain inputs, outputs and commands already. The relevant components needed
+         *           to move the cash will be added on top.
+         * @param amount How much currency to send.
+         * @param to a key of the recipient.
+         * @param acceptableStates a list of acceptable input states to use.
+         * @param deriveState a function to derive an output state based on an input state, amount for the output
+         * and public key to pay to.
+         * @return A [Pair] of the same transaction builder passed in as [tx], and the list of keys that need to sign
+         *         the resulting transaction for it to be valid.
+         * @throws InsufficientBalanceException when a cash spending transaction fails because
+         *         there is insufficient quantity for a given currency (and optionally set of Issuer Parties).
+         */
+        @Throws(InsufficientBalanceException::class)
         fun <S : FungibleAsset<T>, T: Any> generateSpend(tx: TransactionBuilder,
-                          amount: Amount<T>,
-                          to: PublicKey,
-                          acceptableCoins: List<StateAndRef<S>>,
-                          deriveState: (TransactionState<S>, Amount<Issued<T>>, PublicKey) -> TransactionState<S>,
-                          onlyFromParties: Set<AbstractParty>?): Pair<TransactionBuilder, List<PublicKey>> {
+                                                         amount: Amount<T>,
+                                                         to: PublicKey,
+                                                         acceptableStates: List<StateAndRef<S>>,
+                                                         deriveState: (TransactionState<S>, Amount<Issued<T>>, PublicKey) -> TransactionState<S>): Pair<TransactionBuilder, List<PublicKey>> {
             // Discussion
             //
             // This code is analogous to the Wallet.send() set of methods in bitcoinj, and has the same general outline.
@@ -52,9 +67,9 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
             // highest total value.
 
             // notary may be associated with locked state only
-            tx.notary = acceptableCoins.firstOrNull()?.state?.notary
+            tx.notary = acceptableStates.firstOrNull()?.state?.notary
 
-            val (gathered, gatheredAmount) = gatherCoins(acceptableCoins, amount)
+            val (gathered, gatheredAmount) = gatherCoins(acceptableStates, amount)
 
             val takeChangeFrom = gathered.firstOrNull()
             val change = if (takeChangeFrom != null && gatheredAmount > amount) {
