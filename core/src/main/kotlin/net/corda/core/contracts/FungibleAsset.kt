@@ -1,5 +1,6 @@
 package net.corda.core.contracts
 
+import net.corda.core.crypto.Party
 import net.corda.core.flows.FlowException
 import net.corda.core.transactions.TransactionBuilder
 import net.corda.core.utilities.loggerFor
@@ -192,6 +193,21 @@ interface FungibleAsset<T : Any> : OwnableState {
             tx.addCommand(generateMoveCommand(), gathered.map { it.state.data.owner })
             tx.addCommand(generateExitCommand(amountIssued), gathered.flatMap { it.state.data.exitKeys })
             return amountIssued.token.issuer.party.owningKey
+        }
+
+        /**
+         * Puts together an issuance transaction for the specified state. Normally contracts will provide convenient
+         * wrappers around this function, which build the state for you, and those should be used in preference.
+         */
+        fun <S : FungibleAsset<T>, T: Any> generateIssue(tx: TransactionBuilder,
+                                                         transactionState: TransactionState<S>,
+                                                         issueCommand: CommandData) {
+            check(tx.inputStates().isEmpty())
+            check(tx.outputStates().map { it.data }.filterIsInstance(transactionState.javaClass).isEmpty())
+            require(transactionState.data.amount.quantity > 0)
+            val at = transactionState.data.amount.token.issuer
+            tx.addOutputState(transactionState)
+            tx.addCommand(issueCommand, at.party.owningKey)
         }
     }
 

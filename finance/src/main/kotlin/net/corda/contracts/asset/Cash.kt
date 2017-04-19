@@ -151,14 +151,8 @@ class Cash : OnLedgerAsset<Currency, Cash.Commands, Cash.State>() {
     /**
      * Puts together an issuance transaction for the specified amount that starts out being owned by the given pubkey.
      */
-    fun generateIssue(tx: TransactionBuilder, amount: Amount<Issued<Currency>>, owner: PublicKey, notary: Party) {
-        check(tx.inputStates().isEmpty())
-        check(tx.outputStates().map { it.data }.sumCashOrNull() == null)
-        require(amount.quantity > 0)
-        val at = amount.token.issuer
-        tx.addOutputState(TransactionState(State(amount, owner), notary))
-        tx.addCommand(generateIssueCommand(), at.party.owningKey)
-    }
+    fun generateIssue(tx: TransactionBuilder, amount: Amount<Issued<Currency>>, owner: PublicKey, notary: Party)
+        = FungibleAsset.generateIssue(tx, TransactionState(State(amount, owner), notary), generateIssueCommand())
 
     override fun deriveState(txState: TransactionState<State>, amount: Amount<Issued<Currency>>, owner: PublicKey)
             = txState.copy(data = txState.data.copy(amount = amount, owner = owner))

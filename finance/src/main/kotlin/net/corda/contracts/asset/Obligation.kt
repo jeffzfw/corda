@@ -472,12 +472,8 @@ class Obligation<P : Any> : Contract {
                       issuanceDef: Terms<P>,
                       pennies: Long,
                       beneficiary: PublicKey,
-                      notary: Party) {
-        check(tx.inputStates().isEmpty())
-        check(tx.outputStates().map { it.data }.sumObligationsOrNull<P>() == null)
-        tx.addOutputState(State(Lifecycle.NORMAL, obligor.toAnonymous(), issuanceDef, pennies, beneficiary), notary)
-        tx.addCommand(Commands.Issue(), obligor.owningKey)
-    }
+                      notary: Party)
+    = FungibleAsset.generateIssue(tx, TransactionState(State(Lifecycle.NORMAL, obligor.toAnonymous(), issuanceDef, pennies, beneficiary), notary), Commands.Issue())
 
     fun generatePaymentNetting(tx: TransactionBuilder,
                                issued: Issued<Obligation.Terms<P>>,
