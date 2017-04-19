@@ -38,13 +38,11 @@ import org.bouncycastle.asn1.x500.X500Name
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.ResultRow
 import org.jetbrains.exposed.sql.statements.InsertStatement
+import java.security.PublicKey
 import java.time.Instant
 import java.util.*
-import java.util.concurrent.CopyOnWriteArrayList
-import java.util.concurrent.CountDownLatch
-import java.util.concurrent.TimeUnit
+import java.util.concurrent.*
 import javax.annotation.concurrent.ThreadSafe
-import java.security.PublicKey
 
 // TODO: Stop the wallet explorer and other clients from using this class and get rid of persistentInbox
 
@@ -231,6 +229,18 @@ class NodeMessagingClient(override val config: NodeConfiguration,
             null
         } ?: return false
 
+
+        if (artemisMessage.containsProperty("retryId")) {
+            val id = artemisMessage.getStringProperty("retryId")
+            if (id.startsWith("r_")) {
+                scheduled[id.substring(2)]?.let {
+                    it.cancel(true)
+                    println("Cancelling retry for $id")
+                }
+            }
+
+        }
+
         val message: ReceivedMessage? = artemisToCordaMessage(artemisMessage)
         if (message != null)
             deliver(message)
@@ -297,12 +307,15 @@ class NodeMessagingClient(override val config: NodeConfiguration,
             val sessionID = message.required(sessionIdProperty) { getLongProperty(it) }
             // Use the magic deduplication property built into Artemis as our message identity too
             val uuid = message.required(HDR_DUPLICATE_DETECTION_ID) { UUID.fromString(message.getStringProperty(it)) }
+
             val user = requireNotNull(message.getStringProperty(HDR_VALIDATED_USER)) { "Message is not authenticated" }
             log.trace { "Received message from: ${message.address} user: $user topic: $topic sessionID: $sessionID uuid: $uuid" }
 
             val body = ByteArray(message.bodySize).apply { message.bodyBuffer.readBytes(this) }
 
             val msg = object : ReceivedMessage {
+                override val retryId: String?
+                    get() = null
                 override val topicSession = TopicSession(topic, sessionID)
                 override val data: ByteArray = body
                 override val peer: X500Name = X500Name(user)
@@ -402,6 +415,9 @@ class NodeMessagingClient(override val config: NodeConfiguration,
         }
     }
 
+    val retryExecutor = Executors.newScheduledThreadPool(1)
+    val scheduled = HashMap<String, ScheduledFuture<*>>()
+
     override fun send(message: Message, target: MessageRecipients) {
         // We have to perform sending on a different thread pool, since using the same pool for messaging and
         // fibers leads to Netty buffer memory leaks, caused by both Netty and Quasar fiddling with thread-locals.
@@ -412,6 +428,7 @@ class NodeMessagingClient(override val config: NodeConfiguration,
                     putStringProperty(nodeVendorProperty, nodeVendor)
                     putStringProperty(nodeVersionProperty, version)
                     putStringProperty(topicProperty, SimpleString(message.topicSession.topic))
+                    message.retryId?.let { putStringProperty("retryId", it) }
                     putLongProperty(sessionIdProperty, message.topicSession.sessionID)
                     writeBodyBufferBytes(message.data)
                     // Use the magic deduplication property built into Artemis as our message identity too
@@ -426,9 +443,33 @@ class NodeMessagingClient(override val config: NodeConfiguration,
                     "Send to: $mqAddress topic: ${message.topicSession.topic} " +
                             "sessionID: ${message.topicSession.sessionID} uuid: ${message.uniqueMessageId}"
                 }
+
+
                 producer!!.send(mqAddress, artemisMessage)
+
+                message.retryId?.let {
+                    val id = it
+                    if (id.startsWith("r_")) return@let
+                    scheduled[id] = retryExecutor.schedule({
+                        sendWithRetry(0, 3, mqAddress, artemisMessage, id)
+                    }, 3, TimeUnit.SECONDS)
+                    println("Scheduled retry for $id")
+                }
             }
         }
+    }
+
+    fun sendWithRetry(retryCount: Int, maxRetries: Int, address: String, message: ClientMessage, retryId: String) {
+        println("Retry send to $address")
+        if (retryCount >= maxRetries) {
+            log.warn("Reached the maximum number of retries ($maxRetries) for message $message redelivery to $address")
+            return
+        }
+        state.locked { producer!!.send(address, message) }
+
+        scheduled[retryId] = retryExecutor.schedule({
+            sendWithRetry(retryCount + 1, maxRetries, address, message, retryId)
+        }, 3, TimeUnit.SECONDS)
     }
 
     private fun getMQAddress(target: MessageRecipients): String {
@@ -473,13 +514,15 @@ class NodeMessagingClient(override val config: NodeConfiguration,
         handlers.remove(registration)
     }
 
-    override fun createMessage(topicSession: TopicSession, data: ByteArray, uuid: UUID): Message {
+    override fun createMessage(topicSession: TopicSession, data: ByteArray, uuid: UUID, retryId: String?): Message {
         // TODO: We could write an object that proxies directly to an underlying MQ message here and avoid copying.
         return object : Message {
+            override val retryId: String? = retryId
             override val topicSession: TopicSession = topicSession
             override val data: ByteArray = data
             override val debugTimestamp: Instant = Instant.now()
             override val uniqueMessageId: UUID = uuid
+
             override fun toString() = "$topicSession#${String(data)}"
         }
     }

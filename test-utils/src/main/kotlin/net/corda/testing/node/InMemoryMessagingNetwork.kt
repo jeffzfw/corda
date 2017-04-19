@@ -272,12 +272,12 @@ class InMemoryMessagingNetwork(
     }
 
     @CordaSerializable
-    private data class InMemoryMessage(override val topicSession: TopicSession, override val data: ByteArray, override val uniqueMessageId: UUID, override val debugTimestamp: Instant = Instant.now()) : Message {
+    private data class InMemoryMessage(override val topicSession: TopicSession, override val data: ByteArray, override val uniqueMessageId: UUID, override val debugTimestamp: Instant = Instant.now(), override val retryId: String? = null) : Message {
         override fun toString() = "$topicSession#${String(data)}"
     }
 
     @CordaSerializable
-    private data class InMemoryReceivedMessage(override val topicSession: TopicSession, override val data: ByteArray, override val uniqueMessageId: UUID, override val debugTimestamp: Instant, override val peer: X500Name) : ReceivedMessage
+    private data class InMemoryReceivedMessage(override val topicSession: TopicSession, override val data: ByteArray, override val uniqueMessageId: UUID, override val debugTimestamp: Instant, override val peer: X500Name, override val retryId: String? = null) : ReceivedMessage
 
     /**
      * An [InMemoryMessaging] provides a [MessagingService] that isn't backed by any kind of network or disk storage
@@ -367,7 +367,7 @@ class InMemoryMessagingNetwork(
         }
 
         /** Returns the given (topic & session, data) pair as a newly created message object. */
-        override fun createMessage(topicSession: TopicSession, data: ByteArray, uuid: UUID): Message {
+        override fun createMessage(topicSession: TopicSession, data: ByteArray, uuid: UUID, retryId: String?): Message {
             return InMemoryMessage(topicSession, data, uuid)
         }
 

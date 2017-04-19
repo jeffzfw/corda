@@ -34,11 +34,11 @@ private class NotaryDemoClientApi(val rpc: CordaRPCOps) {
     }
 
     private val counterpartyNode by lazy {
-        rpc.networkMapUpdates().first.first { it.legalIdentity.name == BOB.name }
+        rpc.networkMapUpdates().first.first { it.legalIdentity.name == "Counterparty" }
     }
 
     private companion object {
-        private val TRANSACTION_COUNT = 10
+        private val TRANSACTION_COUNT = 300
     }
 
     /** Makes calls to the node rpc to start transaction notarisation. */

@@ -10,6 +10,7 @@ import com.google.common.collect.HashMultimap
 import com.google.common.util.concurrent.ListenableFuture
 import net.corda.core.ThreadBox
 import net.corda.core.bufferUntilSubscribed
+import net.corda.core.crypto.Crypto
 import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
 import net.corda.core.crypto.commonName
@@ -353,7 +354,8 @@ class StateMachineManager(val serviceHub: ServiceHubInternal,
             return
         }
 
-        sendSessionMessage(sender, SessionConfirm(otherPartySessionId, session.ourSessionId), session.fiber)
+        if (!sessionInit.single) sendSessionMessage(sender, SessionConfirm(otherPartySessionId, session.ourSessionId), session.fiber)
+
         session.fiber.logger.debug { "Initiated by $sender using marker ${markerClass.name}" }
         session.fiber.logger.trace { "Initiated from $sessionInit on $session" }
         resumeFiber(session.fiber)
@@ -533,6 +535,14 @@ class StateMachineManager(val serviceHub: ServiceHubInternal,
         val address = serviceHub.networkService.getAddressOfParty(partyInfo)
         val logger = fiber?.logger ?: logger
         logger.trace { "Sending $message to party $party @ $address" }
-        serviceHub.networkService.send(sessionTopic, message, address)
+
+        val retryId = if (message is SessionInit && message.single) {
+            message.initiatorSessionId.toString()
+        } else if (message is SessionDataEnd) {
+            "r_${message.recipientSessionId}"
+        } else null
+
+        val uuid = retryId?.let { UUID.nameUUIDFromBytes(it.toByteArray()) } ?: UUID.randomUUID()
+        serviceHub.networkService.send(sessionTopic, message, address, retryId = retryId)
     }
 }

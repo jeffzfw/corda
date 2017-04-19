@@ -68,6 +68,14 @@ class InteractiveShellTest {
     fun party() = check("party: SomeCorp", "SomeCorp")
 
     class DummyFSM(val logic: FlowA) : FlowStateMachine<Any?> {
+        override fun sendEnd(otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>) {
+            TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+        }
+
+        override fun <T : Any> sendAndReceiveSingle(receiveType: Class<T>, otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>): UntrustworthyData<T> {
+            TODO("not implemented") //To change body of created functions use File | Settings | File Templates.
+        }
+
         override fun <T : Any> sendAndReceive(receiveType: Class<T>, otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>): UntrustworthyData<T> {
             throw UnsupportedOperationException("not implemented")
         }

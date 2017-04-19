@@ -12,7 +12,7 @@ import net.corda.core.utilities.UntrustworthyData
 @CordaSerializable
 interface SessionMessage
 
-data class SessionInit(val initiatorSessionId: Long, val flowName: String, val firstPayload: Any?) : SessionMessage
+data class SessionInit(val initiatorSessionId: Long, val flowName: String, val firstPayload: Any?, val single: Boolean = false) : SessionMessage
 
 interface ExistingSessionMessage : SessionMessage {
     val recipientSessionId: Long
@@ -22,12 +22,16 @@ data class SessionData(override val recipientSessionId: Long, val payload: Any) 
     override fun toString(): String = "${javaClass.simpleName}(recipientSessionId=$recipientSessionId, payload=$payload)"
 }
 
+data class SessionDataEnd(override val recipientSessionId: Long, val payload: Any) : ExistingSessionMessage, SessionEnd {
+    override fun toString(): String = "${javaClass.simpleName}(recipientSessionId=$recipientSessionId, payload=$payload)"
+}
+
 interface SessionInitResponse : ExistingSessionMessage {
     val initiatorSessionId: Long
     override val recipientSessionId: Long get() = initiatorSessionId
 }
 
-data class SessionConfirm(override val initiatorSessionId: Long, val initiatedSessionId: Long) : SessionInitResponse
+data class SessionConfirm(override val initiatorSessionId: Long, val initiatedSessionId: Long, val payload: Any? = null) : SessionInitResponse
 data class SessionReject(override val initiatorSessionId: Long, val errorMessage: String) : SessionInitResponse
 
 interface SessionEnd : ExistingSessionMessage
@@ -44,6 +48,16 @@ fun <T> ReceivedSessionMessage<SessionData>.checkPayloadIs(type: Class<T>): Untr
                 "${message.payload.javaClass.name} (${message.payload})")
     }
 }
+
+fun <T> ReceivedSessionMessage<SessionDataEnd>.checkPayloadIs2(type: Class<T>): UntrustworthyData<T> {
+    if (type.isInstance(message.payload)) {
+        return UntrustworthyData(type.cast(message.payload))
+    } else {
+        throw FlowSessionException("We were expecting a ${type.name} from $sender but we instead got a " +
+                "${message.payload.javaClass.name} (${message.payload})")
+    }
+}
+
 
 /**
  * Thrown when a flow session ends unexpectedly due to a type mismatch (the other side sent an object of a type

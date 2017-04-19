@@ -61,7 +61,7 @@ object NotaryFlow {
             }
 
             val response = try {
-                sendAndReceive<List<DigitalSignature.WithKey>>(notaryParty, payload)
+                sendAndReceiveSingle<List<DigitalSignature.WithKey>>(notaryParty, payload)
             } catch (e: NotaryException) {
                 if (e.error is NotaryError.Conflict) {
                     e.error.conflict.verified()
@@ -112,7 +112,7 @@ object NotaryFlow {
         @Suspendable
         private fun signAndSendResponse(txId: SecureHash) {
             val signature = sign(txId.bytes)
-            send(otherSide, listOf(signature))
+            sendEnd(otherSide, listOf(signature))
         }
 
         private fun validateTimestamp(t: Timestamp?) {

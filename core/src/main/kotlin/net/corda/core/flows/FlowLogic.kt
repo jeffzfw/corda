@@ -64,6 +64,8 @@ abstract class FlowLogic<out T> {
      */
     inline fun <reified R : Any> sendAndReceive(otherParty: Party, payload: Any) = sendAndReceive(R::class.java, otherParty, payload)
 
+    inline fun <reified R : Any> sendAndReceiveSingle(otherParty: Party, payload: Any) = sendAndReceiveSingle(R::class.java, otherParty, payload)
+
     /**
      * Serializes and queues the given [payload] object for sending to the [otherParty]. Suspends until a response
      * is received, which must be of the given [receiveType]. Remember that when receiving data from other parties the data
@@ -78,6 +80,11 @@ abstract class FlowLogic<out T> {
     @Suspendable
     open fun <R : Any> sendAndReceive(receiveType: Class<R>, otherParty: Party, payload: Any): UntrustworthyData<R> {
         return stateMachine.sendAndReceive(receiveType, otherParty, payload, sessionFlow)
+    }
+
+    @Suspendable
+    open fun <R : Any> sendAndReceiveSingle(receiveType: Class<R>, otherParty: Party, payload: Any): UntrustworthyData<R> {
+        return stateMachine.sendAndReceiveSingle(receiveType, otherParty, payload, sessionFlow)
     }
 
     /**
@@ -112,6 +119,9 @@ abstract class FlowLogic<out T> {
      */
     @Suspendable
     open fun send(otherParty: Party, payload: Any) = stateMachine.send(otherParty, payload, sessionFlow)
+
+    @Suspendable
+    open fun sendEnd(otherParty: Party, payload: Any) = stateMachine.sendEnd(otherParty, payload, sessionFlow)
 
     /**
      * Invokes the given subflow. This function returns once the subflow completes successfully with the result

@@ -177,6 +177,34 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
     }
 
     @Suspendable
+    override fun <T : Any> sendAndReceiveSingle(receiveType: Class<T>,
+                                       otherParty: Party,
+                                       payload: Any,
+                                       sessionFlow: FlowLogic<*>): UntrustworthyData<T> {
+        logger.debug { "sendAndReceive(${receiveType.name}, $otherParty, ${payload.toString().abbreviate(300)}) ..." }
+
+        val session = startNewSessionSingle(otherParty, sessionFlow, payload)
+        // Only do a receive here as the session init has carried the payload
+        val sessionData = receiveInternal<SessionDataEnd>(session, receiveType)
+
+        openSessions.values.remove(session)
+
+        logger.debug { "Received ${sessionData.message.payload.toString().abbreviate(300)}" }
+        return sessionData.checkPayloadIs2(receiveType)
+    }
+
+    @Suspendable
+    private fun startNewSessionSingle(otherParty: Party, sessionFlow: FlowLogic<*>, firstPayload: Any?): FlowSession {
+        logger.trace { "Initiating a new session with $otherParty" }
+        val session = FlowSession(sessionFlow, random63BitValue(), null, FlowSessionState.Initiated(otherParty, random63BitValue()))
+        openSessions[Pair(sessionFlow, otherParty)] = session
+        val counterpartyFlow = sessionFlow.getCounterpartyMarker(otherParty).name
+        val sessionInit = SessionInit(session.ourSessionId, counterpartyFlow, firstPayload, true)
+        sendInternal(session, sessionInit)
+        return session
+    }
+
+    @Suspendable
     override fun <T : Any> receive(receiveType: Class<T>,
                                    otherParty: Party,
                                    sessionFlow: FlowLogic<*>): UntrustworthyData<T> {
@@ -198,6 +226,24 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
         } else {
             sendInternal(session, createSessionData(session, payload))
         }
+    }
+
+    @Suspendable
+    override fun sendEnd(otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>) {
+        logger.debug { "send($otherParty, ${payload.toString().abbreviate(300)})" }
+        val session = getConfirmedSession(otherParty, sessionFlow)!!
+        val data = run {
+            val sessionState = session.state
+            println("$sessionState")
+            val peerSessionId = when (sessionState) {
+                is FlowSessionState.Initiating -> throw IllegalStateException("We've somehow held onto an unconfirmed session: $session")
+                is FlowSessionState.Initiated -> sessionState.peerSessionId
+            }
+            SessionDataEnd(peerSessionId, payload)
+        }
+        openSessions.values.remove(session)
+        return sendInternal(session, data)
+
     }
 
     @Suspendable
@@ -228,6 +274,7 @@ class FlowStateMachineImpl<R>(override val id: StateMachineRunId,
     private fun FlowSession.waitForConfirmation() {
         val (peerParty, sessionInitResponse) = receiveInternal<SessionInitResponse>(this, null)
         if (sessionInitResponse is SessionConfirm) {
+            println("Session state is set to initiated")
             state = FlowSessionState.Initiated(peerParty, sessionInitResponse.initiatedSessionId)
         } else {
             sessionInitResponse as SessionReject

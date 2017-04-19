@@ -75,12 +75,13 @@ interface MessagingService {
      */
     fun send(message: Message, target: MessageRecipients)
 
+
     /**
      * Returns an initialised [Message] with the current time, etc, already filled in.
      *
      * @param topicSession identifier for the topic and session the message is sent to.
      */
-    fun createMessage(topicSession: TopicSession, data: ByteArray, uuid: UUID = UUID.randomUUID()): Message
+    fun createMessage(topicSession: TopicSession, data: ByteArray, uuid: UUID = UUID.randomUUID(), retryId: String? = null): Message
 
     /** Given information about either a specific node or a service returns its corresponding address */
     fun getAddressOfParty(partyInfo: PartyInfo): MessageRecipients
@@ -146,10 +147,10 @@ fun <M : Any> MessagingService.onNext(topic: String, sessionId: Long): Listenabl
 }
 
 fun MessagingService.send(topic: String, sessionID: Long, payload: Any, to: MessageRecipients, uuid: UUID = UUID.randomUUID())
-        = send(TopicSession(topic, sessionID), payload, to, uuid)
+        = send(TopicSession(topic, sessionID), payload, to, uuid, null)
 
-fun MessagingService.send(topicSession: TopicSession, payload: Any, to: MessageRecipients, uuid: UUID = UUID.randomUUID())
-        = send(createMessage(topicSession, payload.serialize().bytes, uuid), to)
+fun MessagingService.send(topicSession: TopicSession, payload: Any, to: MessageRecipients, uuid: UUID = UUID.randomUUID(), retryId: String?)
+        = send(createMessage(topicSession, payload.serialize().bytes, uuid, retryId), to)
 
 interface MessageHandlerRegistration
 
@@ -182,6 +183,7 @@ interface Message {
     val data: ByteArray
     val debugTimestamp: Instant
     val uniqueMessageId: UUID
+    val retryId: String?
 }
 
 // TODO Have ReceivedMessage point to the TLS certificate of the peer, and [peer] would simply be the subject DN of that.

@@ -39,10 +39,14 @@ interface FlowStateMachine<R> {
     fun send(otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>)
 
     @Suspendable
+    fun sendEnd(otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>)
+
+    @Suspendable
     fun waitForLedgerCommit(hash: SecureHash, sessionFlow: FlowLogic<*>): SignedTransaction
 
     val serviceHub: ServiceHub
     val logger: Logger
     val id: StateMachineRunId
     val resultFuture: ListenableFuture<R>
+    @Suspendable fun <T : Any> sendAndReceiveSingle(receiveType: Class<T>, otherParty: Party, payload: Any, sessionFlow: FlowLogic<*>): UntrustworthyData<T>
 }

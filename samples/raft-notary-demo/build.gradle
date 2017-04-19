@@ -8,7 +8,7 @@ apply plugin: 'maven-publish'
 
 ext {
     deployTo = "./build/nodes"
-    notaryType = "corda.notary.validating.raft"
+    notaryType = "corda.notary.simple.raft"
     notaryName = "Raft"
     advertisedNotary = "$notaryType|$notaryName"
 }
