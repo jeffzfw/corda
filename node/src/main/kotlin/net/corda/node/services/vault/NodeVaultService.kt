@@ -449,8 +449,9 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                                onlyFromParties: Set<AbstractParty>?): Pair<TransactionBuilder, List<PublicKey>> {
         // Retrieve unspent and unlocked cash states that meet our spending criteria.
         val acceptableCoins = unconsumedStatesForSpending<Cash.State>(amount, onlyFromParties, tx.notary, tx.lockId)
-        return AbstractConserveAmount.generateSpend(tx, amount, to, acceptableCoins,
-                { state, amount, owner -> deriveState(state, amount, owner) })
+        return FungibleAsset.generateSpend(tx, amount, to, acceptableCoins,
+                { state, amount, owner -> deriveState(state, amount, owner) },
+                { Cash().generateMoveCommand() })
     }
 
     private fun deriveState(txState: TransactionState<Cash.State>, amount: Amount<Issued<Currency>>, owner: PublicKey)
