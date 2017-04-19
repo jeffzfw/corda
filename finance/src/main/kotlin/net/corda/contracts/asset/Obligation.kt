@@ -458,7 +458,7 @@ class Obligation<P : Any> : Contract {
     @Suppress("unused")
     fun generateExit(tx: TransactionBuilder, amountIssued: Amount<Issued<Terms<P>>>,
                      assetStates: List<StateAndRef<Obligation.State<P>>>): PublicKey
-            = Clauses.ConserveAmount<P>().generateExit(tx, amountIssued, assetStates,
+            = FungibleAsset.generateExit(tx, amountIssued, assetStates,
             deriveState = { state, amount, owner -> state.copy(data = state.data.move(amount, owner)) },
             generateMoveCommand = { -> Commands.Move() },
             generateExitCommand = { amount -> Commands.Exit(amount) }

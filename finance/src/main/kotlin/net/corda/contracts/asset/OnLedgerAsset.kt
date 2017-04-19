@@ -25,7 +25,6 @@ import java.security.PublicKey
  */
 abstract class OnLedgerAsset<T : Any, C : CommandData, S : FungibleAsset<T>> : Contract {
     abstract fun extractCommands(commands: Collection<AuthenticatedObject<CommandData>>): Collection<AuthenticatedObject<C>>
-    abstract val conserveClause: AbstractConserveAmount<S, C, T>
 
     /**
      * Generate an transaction exiting assets from the ledger.
@@ -41,7 +40,7 @@ abstract class OnLedgerAsset<T : Any, C : CommandData, S : FungibleAsset<T>> : C
     @Throws(InsufficientBalanceException::class)
     fun generateExit(tx: TransactionBuilder, amountIssued: Amount<Issued<T>>,
                      assetStates: List<StateAndRef<S>>): PublicKey {
-        return conserveClause.generateExit(
+        return FungibleAsset.generateExit(
                 tx,
                 amountIssued,
                 assetStates,

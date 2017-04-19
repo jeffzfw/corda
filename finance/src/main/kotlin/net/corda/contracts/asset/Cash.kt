@@ -53,7 +53,6 @@ class Cash : OnLedgerAsset<Currency, Cash.Commands, Cash.State>() {
      * that is inconsistent with the legal contract.
      */
     override val legalContractReference: SecureHash = SecureHash.sha256("https://www.big-book-of-banking-law.gov/cash-claims.html")
-    override val conserveClause: AbstractConserveAmount<State, Commands, Currency> = Clauses.ConserveAmount()
     override fun extractCommands(commands: Collection<AuthenticatedObject<CommandData>>): List<AuthenticatedObject<Cash.Commands>>
             = commands.select<Cash.Commands>()
 

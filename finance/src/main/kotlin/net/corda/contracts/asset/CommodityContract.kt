@@ -47,8 +47,6 @@ class CommodityContract : OnLedgerAsset<Commodity, CommodityContract.Commands, C
      */
     override val legalContractReference: SecureHash = SecureHash.sha256("https://www.big-book-of-banking-law.gov/commodity-claims.html")
 
-    override val conserveClause: AbstractConserveAmount<State, Commands, Commodity> = Clauses.ConserveAmount()
-
     /**
      * The clauses for this contract are essentially:
      *
