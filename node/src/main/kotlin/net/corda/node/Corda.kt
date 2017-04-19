@@ -6,8 +6,7 @@ import com.jcabi.manifests.Manifests
 import com.typesafe.config.ConfigException
 import joptsimple.OptionException
 import net.corda.core.*
-import net.corda.core.node.NodeVersionInfo
-import net.corda.core.node.Version
+import net.corda.core.node.VersionInfo
 import net.corda.core.utilities.Emoji
 import net.corda.node.internal.Node
 import net.corda.node.services.config.FullNodeConfiguration
@@ -59,15 +58,17 @@ fun main(args: Array<String>) {
     // Manifest properties are only available if running from the corda jar
     fun manifestValue(name: String): String? = if (Manifests.exists(name)) Manifests.read(name) else null
 
-    val nodeVersionInfo = NodeVersionInfo(
-            manifestValue("Corda-Version")?.let { Version.parse(it) } ?: Version(0, 0, 0, false),
+    val versionInfo = VersionInfo(
+            manifestValue("Corda-Platform-Version")?.toInt() ?: 1,
+            manifestValue("Corda-Release-Version") ?: "Unknown",
             manifestValue("Corda-Revision") ?: "Unknown",
             manifestValue("Corda-Vendor") ?: "Unknown"
     )
 
     if (cmdlineOptions.isVersion) {
-        println("${nodeVersionInfo.vendor} ${nodeVersionInfo.version}")
-        println("Revision ${nodeVersionInfo.revision}")
+        println("${versionInfo.vendor} ${versionInfo.releaseVersion}")
+        println("Revision ${versionInfo.revision}")
+        println("Platform Version ${versionInfo.platformVersion}")
         exitProcess(0)
     }
 
@@ -77,7 +78,7 @@ fun main(args: Array<String>) {
         exitProcess(0)
     }
 
-    drawBanner(nodeVersionInfo)
+    drawBanner(versionInfo)
 
     val dir: Path = cmdlineOptions.baseDirectory
     System.setProperty("log-path", (dir / "logs").toString())
@@ -103,9 +104,10 @@ fun main(args: Array<String>) {
         exitProcess(0)
     }
 
-    log.info("Version: ${nodeVersionInfo.version}")
-    log.info("Vendor: ${nodeVersionInfo.vendor}")
-    log.info("Revision: ${nodeVersionInfo.revision}")
+    log.info("Vendor: ${versionInfo.vendor}")
+    log.info("Release: ${versionInfo.releaseVersion}")
+    log.info("Platform Version: ${versionInfo.platformVersion}")
+    log.info("Revision: ${versionInfo.revision}")
     val info = ManagementFactory.getRuntimeMXBean()
     log.info("PID: ${info.name.split("@").firstOrNull()}")  // TODO Java 9 has better support for this
     log.info("Main class: ${FullNodeConfiguration::class.java.protectionDomain.codeSource.location.toURI().path}")
@@ -125,7 +127,7 @@ fun main(args: Array<String>) {
     try {
         cmdlineOptions.baseDirectory.createDirectories()
 
-        val node = conf.createNode(nodeVersionInfo)
+        val node = conf.createNode(versionInfo)
         node.start()
         printPluginsAndServices(node)
 
@@ -210,7 +212,7 @@ private fun messageOfTheDay(): Pair<String, String> {
     return Pair(a, b)
 }
 
-private fun drawBanner(nodeVersionInfo: NodeVersionInfo) {
+private fun drawBanner(versionInfo: VersionInfo) {
     // This line makes sure ANSI escapes work on Windows, where they aren't supported out of the box.
     AnsiConsole.systemInstall()
 
@@ -223,7 +225,7 @@ private fun drawBanner(nodeVersionInfo: NodeVersionInfo) {
  / /     __  / ___/ __  / __ `/         """).fgBrightBlue().a(msg1).newline().fgBrightRed().a(
 "/ /___  /_/ / /  / /_/ / /_/ /          ").fgBrightBlue().a(msg2).newline().fgBrightRed().a(
 """\____/     /_/   \__,_/\__,_/""").reset().newline().newline().fgBrightDefault().bold().
-        a("--- ${nodeVersionInfo.vendor} ${nodeVersionInfo.version} (${nodeVersionInfo.revision.take(7)}) -----------------------------------------------").
+        a("--- ${versionInfo.vendor} ${versionInfo.releaseVersion} (${versionInfo.revision.take(7)}) -----------------------------------------------").
         newline().
         newline().
         a("${Emoji.books}New! ").reset().a("Training now available worldwide, see https://corda.net/corda-training/").
