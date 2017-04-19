@@ -14,6 +14,9 @@ UNRELEASED
 
     * DemoBench is now installed as ``Corda DemoBench`` instead of ``DemoBench``.
 
+    * Moved ``generateSpend`` and ``generateExit`` functions into ``FungibleAsset`` from the vault and
+      ``AbstractConserveAmount`` clauses respectively.
+
 Milestone 10.0
 --------------
 
