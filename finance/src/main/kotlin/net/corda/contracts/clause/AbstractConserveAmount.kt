@@ -33,7 +33,10 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
                      deriveState: (TransactionState<S>, Amount<Issued<T>>, PublicKey) -> TransactionState<S>,
                      generateMoveCommand: () -> CommandData,
                      generateExitCommand: (Amount<Issued<T>>) -> CommandData): PublicKey
-    = FungibleAsset.generateExit(tx, amountIssued, assetStates, deriveState, generateMoveCommand, generateExitCommand)
+    = FungibleAsset.generateExit(tx, amountIssued, assetStates,
+            deriveState = deriveState,
+            generateMoveCommand = generateMoveCommand,
+            generateExitCommand = generateExitCommand)
 
     override fun verify(tx: TransactionForContract,
                         inputs: List<S>,

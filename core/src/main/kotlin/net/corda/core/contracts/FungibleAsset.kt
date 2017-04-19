@@ -2,6 +2,7 @@ package net.corda.core.contracts
 
 import net.corda.core.crypto.Party
 import net.corda.core.flows.FlowException
+import net.corda.core.node.services.VaultService
 import net.corda.core.transactions.TransactionBuilder
 import net.corda.core.utilities.loggerFor
 import net.corda.core.utilities.trace
@@ -51,6 +52,7 @@ interface FungibleAsset<T : Any> : OwnableState {
                                                          amount: Amount<T>,
                                                          to: PublicKey,
                                                          acceptableStates: List<StateAndRef<S>>,
+                                                         vaultService: VaultService,
                                                          deriveState: (TransactionState<S>, Amount<Issued<T>>, PublicKey) -> TransactionState<S>,
                                                          generateMoveCommand: () -> CommandData): Pair<TransactionBuilder, List<PublicKey>> {
             // Discussion
@@ -80,7 +82,7 @@ interface FungibleAsset<T : Any> : OwnableState {
             // notary may be associated with locked state only
             tx.notary = acceptableStates.firstOrNull()?.state?.notary
 
-            val (gathered, gatheredAmount) = gatherCoins(acceptableStates, amount)
+            val (gathered, gatheredAmount) = gatherCoins(acceptableStates, amount, vaultService)
 
             val takeChangeFrom = gathered.firstOrNull()
             val change = if (takeChangeFrom != null && gatheredAmount > amount) {
@@ -126,11 +128,13 @@ interface FungibleAsset<T : Any> : OwnableState {
          *
          * @param acceptableCoins list of states to use as inputs.
          * @param amount the amount to gather states up to.
+         * @param vaultService vault service, used for diagnostic information in case of problems.
          * @throws InsufficientBalanceException if there isn't enough value in the states to cover the requested amount.
          */
         @Throws(InsufficientBalanceException::class)
         private fun <S : FungibleAsset<T>, T : Any> gatherCoins(acceptableCoins: Collection<StateAndRef<S>>,
-                                                                amount: Amount<T>): Pair<ArrayList<StateAndRef<S>>, Amount<T>> {
+                                                                amount: Amount<T>,
+                                                                vaultService: VaultService?): Pair<ArrayList<StateAndRef<S>>, Amount<T>> {
             require(amount.quantity > 0) { "Cannot gather zero coins" }
             val gathered = arrayListOf<StateAndRef<S>>()
             var gatheredAmount = Amount(0, amount.token)
@@ -141,11 +145,17 @@ interface FungibleAsset<T : Any> : OwnableState {
             }
 
             if (gatheredAmount < amount) {
-                log.trace { "Insufficient balance: requested $amount, available $gatheredAmount" }
+                log.trace {
+                    val token = amount.token
+                    if (token is Currency && vaultService != null)
+                        "Insufficient balance: requested $amount, available $gatheredAmount (total balance ${vaultService.cashBalances[token]})"
+                    else
+                        "Insufficient balance: requested $amount, available $gatheredAmount"
+                }
                 throw InsufficientBalanceException(amount - gatheredAmount)
             }
 
-            log.trace("Gathered coins: requested $amount, available $gatheredAmount, change: ${gatheredAmount - amount}")
+            log.trace { "Gathered coins: requested $amount, available $gatheredAmount, change: ${gatheredAmount - amount}" }
 
             return Pair(gathered, gatheredAmount)
         }
@@ -157,11 +167,13 @@ interface FungibleAsset<T : Any> : OwnableState {
          * @param amountIssued the amount to be exited, represented as a quantity of issued currency.
          * @param assetStates the asset states to take funds from. No checks are done about ownership of these states, it is
          * the responsibility of the caller to check that they do not attempt to exit funds held by others.
+         * @param vaultService vault service, used for diagnostic information in case of problems.
          * @return the public key of the assets issuer, who must sign the transaction for it to be valid.
          */
         @Throws(InsufficientBalanceException::class)
         fun <S : FungibleAsset<T>, T: Any> generateExit(tx: TransactionBuilder, amountIssued: Amount<Issued<T>>,
                          assetStates: List<StateAndRef<S>>,
+                         vaultService: VaultService? = null,
                          deriveState: (TransactionState<S>, Amount<Issued<T>>, PublicKey) -> TransactionState<S>,
                          generateMoveCommand: () -> CommandData,
                          generateExitCommand: (Amount<Issued<T>>) -> CommandData): PublicKey {
@@ -175,7 +187,7 @@ interface FungibleAsset<T : Any> : OwnableState {
             // highest total value
             acceptableCoins = acceptableCoins.filter { it.state.notary == tx.notary }
 
-            val (gathered, gatheredAmount) = gatherCoins(acceptableCoins, amount)
+            val (gathered, gatheredAmount) = gatherCoins(acceptableCoins, amount, vaultService)
             val takeChangeFrom = gathered.lastOrNull()
             val change = if (takeChangeFrom != null && gatheredAmount > amount) {
                 Amount(gatheredAmount.quantity - amount.quantity, takeChangeFrom.state.data.amount.token)
