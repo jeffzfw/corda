@@ -5,8 +5,6 @@ package net.corda.testing
 
 import com.google.common.net.HostAndPort
 import com.google.common.util.concurrent.ListenableFuture
-import com.typesafe.config.Config
-import net.corda.nodeapi.config.SSLConfiguration
 import net.corda.core.contracts.StateRef
 import net.corda.core.crypto.*
 import net.corda.core.flows.FlowLogic
@@ -16,16 +14,14 @@ import net.corda.core.node.Version
 import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.toFuture
 import net.corda.core.transactions.TransactionBuilder
-import net.corda.core.utilities.DUMMY_NOTARY
-import net.corda.core.utilities.DUMMY_NOTARY_KEY
+import net.corda.core.utilities.*
 import net.corda.node.internal.AbstractNode
 import net.corda.node.internal.NetworkMapInfo
-import net.corda.node.services.config.NodeConfiguration
-import net.corda.node.services.config.configureDevKeyAndTrustStores
-import net.corda.node.services.config.VerifierType
-import net.corda.node.services.messaging.CertificateChainCheckPolicy
+import net.corda.node.services.config.*
 import net.corda.node.services.statemachine.FlowStateMachineImpl
 import net.corda.node.utilities.AddOrRemove.ADD
+import net.corda.nodeapi.User
+import net.corda.nodeapi.config.SSLConfiguration
 import net.corda.testing.node.MockIdentityService
 import net.corda.testing.node.MockServices
 import net.corda.testing.node.makeTestDataSourceProperties
@@ -34,6 +30,7 @@ import java.net.URL
 import java.nio.file.Files
 import java.nio.file.Path
 import java.security.KeyPair
+import java.security.PublicKey
 import java.util.*
 import kotlin.reflect.KClass
 
@@ -57,36 +54,28 @@ import kotlin.reflect.KClass
 
 // A few dummy values for testing.
 val MEGA_CORP_KEY: KeyPair by lazy { generateKeyPair() }
-val MEGA_CORP_PUBKEY: CompositeKey get() = MEGA_CORP_KEY.public.composite
+val MEGA_CORP_PUBKEY: PublicKey get() = MEGA_CORP_KEY.public
 
 val MINI_CORP_KEY: KeyPair by lazy { generateKeyPair() }
-val MINI_CORP_PUBKEY: CompositeKey get() = MINI_CORP_KEY.public.composite
+val MINI_CORP_PUBKEY: PublicKey get() = MINI_CORP_KEY.public
 
 val ORACLE_KEY: KeyPair by lazy { generateKeyPair() }
-val ORACLE_PUBKEY: CompositeKey get() = ORACLE_KEY.public.composite
+val ORACLE_PUBKEY: PublicKey get() = ORACLE_KEY.public
 
-val ALICE_KEY: KeyPair by lazy { generateKeyPair() }
-val ALICE_PUBKEY: CompositeKey get() = ALICE_KEY.public.composite
-val ALICE: Party get() = Party("Alice", ALICE_PUBKEY)
-
-val BOB_KEY: KeyPair by lazy { generateKeyPair() }
-val BOB_PUBKEY: CompositeKey get() = BOB_KEY.public.composite
-val BOB: Party get() = Party("Bob", BOB_PUBKEY)
-
-val CHARLIE_KEY: KeyPair by lazy { generateKeyPair() }
-val CHARLIE_PUBKEY: CompositeKey get() = CHARLIE_KEY.public.composite
-val CHARLIE: Party get() = Party("Charlie", CHARLIE_PUBKEY)
+val ALICE_PUBKEY: PublicKey get() = ALICE_KEY.public
+val BOB_PUBKEY: PublicKey get() = BOB_KEY.public
+val CHARLIE_PUBKEY: PublicKey get() = CHARLIE_KEY.public
 
 val MEGA_CORP: Party get() = Party("MegaCorp", MEGA_CORP_PUBKEY)
 val MINI_CORP: Party get() = Party("MiniCorp", MINI_CORP_PUBKEY)
 
 val BOC_KEY: KeyPair by lazy { generateKeyPair() }
-val BOC_PUBKEY: CompositeKey get() = BOC_KEY.public.composite
+val BOC_PUBKEY: PublicKey get() = BOC_KEY.public
 val BOC: Party get() = Party("BankOfCorda", BOC_PUBKEY)
 val BOC_PARTY_REF = BOC.ref(OpaqueBytes.of(1)).reference
 
 val BIG_CORP_KEY: KeyPair by lazy { generateKeyPair() }
-val BIG_CORP_PUBKEY: CompositeKey get() = BIG_CORP_KEY.public.composite
+val BIG_CORP_PUBKEY: PublicKey get() = BIG_CORP_KEY.public
 val BIG_CORP: Party get() = Party("BigCorporation", BIG_CORP_PUBKEY)
 val BIG_CORP_PARTY_REF = BIG_CORP.ref(OpaqueBytes.of(1)).reference
 
@@ -94,7 +83,7 @@ val ALL_TEST_KEYS: List<KeyPair> get() = listOf(MEGA_CORP_KEY, MINI_CORP_KEY, AL
 
 val MOCK_IDENTITY_SERVICE: MockIdentityService get() = MockIdentityService(listOf(MEGA_CORP, MINI_CORP, DUMMY_NOTARY))
 
-val MOCK_VERSION = Version(0, 0, false)
+val MOCK_VERSION = Version(0, 0, 0, false)
 val MOCK_NODE_VERSION_INFO = NodeVersionInfo(MOCK_VERSION, "Mock revision", "Mock Vendor")
 
 fun generateStateRef() = StateRef(SecureHash.randomSHA256(), 0)
@@ -162,22 +151,47 @@ inline fun <reified P : FlowLogic<*>> AbstractNode.initiateSingleShotFlow(
     return future
 }
 
+// TODO Replace this with testConfiguration
 data class TestNodeConfiguration(
         override val baseDirectory: Path,
         override val myLegalName: String,
         override val networkMapService: NetworkMapInfo?,
         override val keyStorePassword: String = "cordacadevpass",
         override val trustStorePassword: String = "trustpass",
+        override val rpcUsers: List<User> = emptyList(),
         override val dataSourceProperties: Properties = makeTestDataSourceProperties(myLegalName),
         override val nearestCity: String = "Null Island",
         override val emailAddress: String = "",
         override val exportJMXto: String = "",
         override val devMode: Boolean = true,
         override val certificateSigningService: URL = URL("http://localhost"),
-        override val certificateChainCheckPolicies: Map<String, CertificateChainCheckPolicy> = emptyMap(),
+        override val certificateChainCheckPolicies: List<CertChainPolicyConfig> = emptyList(),
         override val verifierType: VerifierType = VerifierType.InMemory) : NodeConfiguration
 
-fun Config.getHostAndPort(name: String) = HostAndPort.fromString(getString(name))
+fun testConfiguration(baseDirectory: Path, legalName: String, basePort: Int): FullNodeConfiguration {
+    return FullNodeConfiguration(
+            basedir = baseDirectory,
+            myLegalName = legalName,
+            networkMapService = null,
+            nearestCity = "Null Island",
+            emailAddress = "",
+            keyStorePassword = "cordacadevpass",
+            trustStorePassword = "trustpass",
+            dataSourceProperties = makeTestDataSourceProperties(legalName),
+            certificateSigningService = URL("http://localhost"),
+            rpcUsers = emptyList(),
+            verifierType = VerifierType.InMemory,
+            useHTTPS = false,
+            p2pAddress = HostAndPort.fromParts("localhost", basePort),
+            rpcAddress = HostAndPort.fromParts("localhost", basePort + 1),
+            messagingServerAddress = null,
+            extraAdvertisedServiceIds = emptyList(),
+            notaryNodeId = null,
+            notaryNodeAddress = null,
+            notaryClusterAddresses = emptyList(),
+            certificateChainCheckPolicies = emptyList(),
+            devMode = true)
+}
 
 @JvmOverloads
 fun configureTestSSL(legalName: String = "Mega Corp."): SSLConfiguration = object : SSLConfiguration {

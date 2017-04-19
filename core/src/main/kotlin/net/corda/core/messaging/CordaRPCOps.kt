@@ -5,7 +5,6 @@ import net.corda.core.contracts.Amount
 import net.corda.core.contracts.ContractState
 import net.corda.core.contracts.StateAndRef
 import net.corda.core.contracts.UpgradedContract
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
 import net.corda.core.flows.FlowLogic
@@ -16,8 +15,10 @@ import net.corda.core.node.services.StateMachineTransactionMapping
 import net.corda.core.node.services.Vault
 import net.corda.core.serialization.CordaSerializable
 import net.corda.core.transactions.SignedTransaction
+import org.bouncycastle.asn1.x500.X500Name
 import rx.Observable
 import java.io.InputStream
+import java.security.PublicKey
 import java.time.Instant
 import java.util.*
 
@@ -26,17 +27,19 @@ data class StateMachineInfo(
         val id: StateMachineRunId,
         val flowLogicClassName: String,
         val progressTrackerStepAndUpdates: Pair<String, Observable<String>>?
-)
+) {
+    override fun toString(): String = "${javaClass.simpleName}($id, $flowLogicClassName)"
+}
 
 @CordaSerializable
-sealed class StateMachineUpdate(val id: StateMachineRunId) {
-    class Added(val stateMachineInfo: StateMachineInfo) : StateMachineUpdate(stateMachineInfo.id) {
-        override fun toString() = "Added($id, ${stateMachineInfo.flowLogicClassName})"
+sealed class StateMachineUpdate {
+    abstract val id: StateMachineRunId
+
+    data class Added(val stateMachineInfo: StateMachineInfo) : StateMachineUpdate() {
+        override val id: StateMachineRunId get() = stateMachineInfo.id
     }
 
-    class Removed(id: StateMachineRunId) : StateMachineUpdate(id) {
-        override fun toString() = "Removed($id)"
-    }
+    data class Removed(override val id: StateMachineRunId) : StateMachineUpdate()
 }
 
 /**
@@ -110,7 +113,7 @@ interface CordaRPCOps : RPCOps {
      * Checks whether an attachment with the given hash is stored on the node.
      */
     fun attachmentExists(id: SecureHash): Boolean
-    
+
     /**
      * Download an attachment JAR by ID
      */
@@ -156,12 +159,17 @@ interface CordaRPCOps : RPCOps {
     /**
      * Returns the [Party] corresponding to the given key, if found.
      */
-    fun partyFromKey(key: CompositeKey): Party?
+    fun partyFromKey(key: PublicKey): Party?
 
     /**
      * Returns the [Party] with the given name as it's [Party.name]
      */
     fun partyFromName(name: String): Party?
+
+    /**
+     * Returns the [Party] with the X.500 principal as it's [Party.name]
+     */
+    fun partyFromX500Name(x500Name: X500Name): Party?
 
     /** Enumerates the class names of the flows that this node knows about. */
     fun registeredFlows(): List<String>
@@ -219,7 +227,7 @@ inline fun <T : Any, A, B, C, D, reified R : FlowLogic<T>> CordaRPCOps.startFlow
  * @param returnValue A [ListenableFuture] of the flow's return value.
  */
 @CordaSerializable
-data class FlowHandle<A> (
+data class FlowHandle<A>(
         val id: StateMachineRunId,
         val progress: Observable<String>,
         val returnValue: ListenableFuture<A>) : AutoCloseable {

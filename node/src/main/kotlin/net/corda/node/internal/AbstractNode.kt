@@ -49,13 +49,15 @@ import net.corda.node.services.vault.VaultSoftLockManager
 import net.corda.node.utilities.AddOrRemove.ADD
 import net.corda.node.utilities.AffinityExecutor
 import net.corda.node.utilities.configureDatabase
-import net.corda.node.utilities.databaseTransaction
+import net.corda.node.utilities.transaction
 import org.apache.activemq.artemis.utils.ReusableLatch
 import org.jetbrains.exposed.sql.Database
 import org.slf4j.Logger
+import java.io.IOException
 import java.nio.file.FileAlreadyExistsException
 import java.nio.file.Path
 import java.security.KeyPair
+import java.security.KeyStoreException
 import java.time.Clock
 import java.util.*
 import java.util.concurrent.ConcurrentHashMap
@@ -139,7 +141,7 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
         }
 
         override fun recordTransactions(txs: Iterable<SignedTransaction>) {
-            databaseTransaction(database) {
+            database.transaction {
                 recordTransactionsInternal(storage, txs)
             }
         }
@@ -197,10 +199,12 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
             log.warn("Corda node is running in dev mode.")
             configuration.configureWithDevSSLCertificate()
         }
-        require(hasSSLCertificates()) { "Identity certificate not found. " +
-                "Please either copy your existing identity key and certificate from another node, " +
-                "or if you don't have one yet, fill out the config file and run corda.jar --initial-registration. " +
-                "Read more at: https://docs.corda.net/permissioning.html" }
+        require(hasSSLCertificates()) {
+            "Identity certificate not found. " +
+                    "Please either copy your existing identity key and certificate from another node, " +
+                    "or if you don't have one yet, fill out the config file and run corda.jar --initial-registration. " +
+                    "Read more at: https://docs.corda.net/permissioning.html"
+        }
 
         log.info("Node starting up ...")
 
@@ -263,7 +267,7 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
         // the identity key. But the infrastructure to make that easy isn't here yet.
         keyManagement = makeKeyManagementService()
         flowLogicFactory = initialiseFlowLogicFactory()
-        scheduler = NodeSchedulerService(database, services, flowLogicFactory, unfinishedSchedules = busyNodeLatch)
+        scheduler = NodeSchedulerService(services, flowLogicFactory, unfinishedSchedules = busyNodeLatch)
 
         val tokenizableServices = mutableListOf(storage, net, vault, keyManagement, identity, platformClock, scheduler)
         makeAdvertisedServices(tokenizableServices)
@@ -285,7 +289,7 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
         VaultSoftLockManager(vault, smm)
         CashBalanceAsMetricsObserver(services, database)
         ScheduledActivityObserver(services)
-        HibernateObserver(vault, schemas)
+        HibernateObserver(vault.rawUpdates, schemas)
     }
 
     private fun makeInfo(): NodeInfo {
@@ -312,9 +316,12 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
 
     private fun hasSSLCertificates(): Boolean {
         val keyStore = try {
-            // This will throw exception if key file not found or keystore password is incorrect.
+            // This will throw IOException if key file not found or KeyStoreException if keystore password is incorrect.
             X509Utilities.loadKeyStore(configuration.keyStoreFile, configuration.keyStorePassword)
-        } catch (e: Exception) {
+        } catch (e: IOException) {
+            null
+        } catch (e: KeyStoreException) {
+            log.warn("Certificate key store found but key store password does not match configuration.")
             null
         }
         return keyStore?.containsAlias(X509Utilities.CORDA_CLIENT_CA) ?: false
@@ -332,7 +339,7 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
             log.info("Connected to ${database.vendor} database.")
             dbCloser = Runnable { toClose.close() }
             runOnStop += dbCloser!!
-            databaseTransaction(database) {
+            database.transaction {
                 insideTransaction()
             }
         } else {
@@ -410,8 +417,8 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
         }
         val address = networkMapAddress ?: info.address
         // Register for updates, even if we're the one running the network map.
-        return sendNetworkMapRegistration(address).flatMap { response ->
-            check(response.error == null) { "Unable to register with the network map service: ${response.error}" }
+        return sendNetworkMapRegistration(address).flatMap { (error) ->
+            check(error == null) { "Unable to register with the network map service: $error" }
             // The future returned addMapService will complete on the same executor as sendNetworkMapRegistration, namely the one used by net
             services.networkMapCache.addMapService(net, address, true, null)
         }
@@ -482,7 +489,7 @@ abstract class AbstractNode(open val configuration: NodeConfiguration,
 
     protected open fun makeSchemaService(): SchemaService = NodeSchemaService()
 
-    protected abstract fun makeTransactionVerifierService() : TransactionVerifierService
+    protected abstract fun makeTransactionVerifierService(): TransactionVerifierService
 
     open fun stop() {
         // TODO: We need a good way of handling "nice to have" shutdown events, especially those that deal with the

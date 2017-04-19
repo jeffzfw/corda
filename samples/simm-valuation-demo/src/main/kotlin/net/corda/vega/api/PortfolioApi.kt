@@ -4,12 +4,12 @@ import com.opengamma.strata.basics.currency.MultiCurrencyAmount
 import net.corda.core.contracts.DealState
 import net.corda.core.contracts.StateAndRef
 import net.corda.core.contracts.filterStatesOfType
-import net.corda.core.crypto.AbstractParty
-import net.corda.core.crypto.CompositeKey
-import net.corda.core.crypto.Party
+import net.corda.core.crypto.*
 import net.corda.core.getOrThrow
 import net.corda.core.messaging.CordaRPCOps
 import net.corda.core.messaging.startFlow
+import net.corda.core.utilities.DUMMY_MAP
+import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.vega.analytics.InitialMarginTriple
 import net.corda.vega.contracts.IRSState
 import net.corda.vega.contracts.PortfolioState
@@ -43,7 +43,7 @@ class PortfolioApi(val rpc: CordaRPCOps) {
      * Used as such: withParty(name) { doSomethingWith(it) }
      */
     private fun withParty(partyName: String, func: (Party) -> Response): Response {
-        val otherParty = rpc.partyFromKey(CompositeKey.parseFromBase58(partyName))
+        val otherParty = rpc.partyFromKey(parsePublicKeyBase58(partyName))
         return if (otherParty != null) {
             func(otherParty)
         } else {
@@ -248,7 +248,9 @@ class PortfolioApi(val rpc: CordaRPCOps) {
     @Produces(MediaType.APPLICATION_JSON)
     fun getWhoAmI(): AvailableParties {
         val counterParties = rpc.networkMapUpdates().first.filter {
-            it.legalIdentity.name != "NetworkMapService" && it.legalIdentity.name != "Notary" && it.legalIdentity.name != ownParty.name
+            it.legalIdentity.name != DUMMY_MAP.name
+                    && it.legalIdentity.name != DUMMY_NOTARY.name
+                    && it.legalIdentity.name != ownParty.name
         }
 
         return AvailableParties(

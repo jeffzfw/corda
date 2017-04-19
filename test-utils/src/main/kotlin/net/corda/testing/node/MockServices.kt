@@ -17,18 +17,18 @@ import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.node.services.persistence.InMemoryStateMachineRecordedTransactionMappingStorage
 import net.corda.node.services.schema.HibernateObserver
 import net.corda.node.services.schema.NodeSchemaService
-import net.corda.node.services.vault.NodeVaultService
 import net.corda.node.services.transactions.InMemoryTransactionVerifierService
+import net.corda.node.services.vault.NodeVaultService
 import net.corda.testing.MEGA_CORP
 import net.corda.testing.MINI_CORP
 import net.corda.testing.MOCK_VERSION
+import org.bouncycastle.asn1.x500.X500Name
 import rx.Observable
 import rx.subjects.PublishSubject
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
 import java.io.File
 import java.io.InputStream
-import java.nio.file.Path
 import java.nio.file.Paths
 import java.security.KeyPair
 import java.security.PrivateKey
@@ -68,30 +68,34 @@ open class MockServices(val key: KeyPair = generateKeyPair()) : ServiceHub {
     override val networkMapCache: NetworkMapCache get() = throw UnsupportedOperationException()
     override val clock: Clock get() = Clock.systemUTC()
     override val schedulerService: SchedulerService get() = throw UnsupportedOperationException()
-    override val myInfo: NodeInfo get() = NodeInfo(object : SingleMessageRecipient {}, Party("MegaCorp", key.public.composite), MOCK_VERSION)
+    override val myInfo: NodeInfo get() = NodeInfo(object : SingleMessageRecipient {}, Party("MegaCorp", key.public), MOCK_VERSION)
     override val transactionVerifierService: TransactionVerifierService get() = InMemoryTransactionVerifierService(2)
 
     fun makeVaultService(dataSourceProps: Properties): VaultService {
         val vaultService = NodeVaultService(this, dataSourceProps)
         // Vault cash spending requires access to contract_cash_states and their updates
-        HibernateObserver(vaultService, NodeSchemaService())
+        HibernateObserver(vaultService.rawUpdates, NodeSchemaService())
         return vaultService
     }
 }
 
 @ThreadSafe
 class MockIdentityService(val identities: List<Party>) : IdentityService, SingletonSerializeAsToken() {
-    private val keyToParties: Map<CompositeKey, Party>
+    private val keyToParties: Map<PublicKey, Party>
         get() = synchronized(identities) { identities.associateBy { it.owningKey } }
     private val nameToParties: Map<String, Party>
         get() = synchronized(identities) { identities.associateBy { it.name } }
 
-    override fun registerIdentity(party: Party) { throw UnsupportedOperationException() }
+    override fun registerIdentity(party: Party) {
+        throw UnsupportedOperationException()
+    }
+
     override fun getAllIdentities(): Iterable<Party> = ArrayList(keyToParties.values)
     override fun partyFromAnonymous(party: AnonymousParty): Party? = keyToParties[party.owningKey]
     override fun partyFromAnonymous(partyRef: PartyAndReference): Party? = partyFromAnonymous(partyRef.party)
-    override fun partyFromKey(key: CompositeKey): Party? = keyToParties[key]
+    override fun partyFromKey(key: PublicKey): Party? = keyToParties[key]
     override fun partyFromName(name: String): Party? = nameToParties[name]
+    override fun partyFromX500Name(principal: X500Name): Party? = nameToParties[principal.toString()]
 }
 
 
@@ -172,7 +176,7 @@ class MockStorageService(override val attachments: AttachmentStorage = MockAttac
                          override val validatedTransactions: TransactionStorage = MockTransactionStorage(),
                          override val uploaders: List<FileUploader> = listOf<FileUploader>(),
                          override val stateMachineRecordedTransactionMapping: StateMachineRecordedTransactionMappingStorage = MockStateMachineRecordedTransactionMappingStorage())
-: SingletonSerializeAsToken(), TxWritableStorageService
+    : SingletonSerializeAsToken(), TxWritableStorageService
 
 /**
  * Make properties appropriate for creating a DataSource for unit tests.

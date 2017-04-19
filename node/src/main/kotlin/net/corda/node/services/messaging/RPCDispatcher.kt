@@ -15,9 +15,9 @@ import net.corda.core.messaging.RPCReturnsObservables
 import net.corda.core.serialization.SerializedBytes
 import net.corda.core.serialization.deserialize
 import net.corda.core.serialization.serialize
+import net.corda.core.utilities.debug
 import net.corda.node.services.RPCUserService
 import net.corda.node.utilities.AffinityExecutor
-import net.corda.core.utilities.debug
 import net.corda.nodeapi.*
 import net.corda.nodeapi.ArtemisMessagingComponent.Companion.NODE_USER
 import org.apache.activemq.artemis.api.core.Message
@@ -52,7 +52,7 @@ abstract class RPCDispatcher(val ops: RPCOps, val userService: RPCUserService, v
     //
     // When the observables are deserialised on the client side, the handle is read from the byte stream and
     // the queue is filtered to extract just those observations.
-    class ObservableSerializer() : Serializer<Observable<Any>>() {
+    class ObservableSerializer : Serializer<Observable<Any>>() {
         private fun toQName(kryo: Kryo): String = kryo.context[RPCKryoQNameKey] as String
         private fun toDispatcher(kryo: Kryo): RPCDispatcher = kryo.context[RPCKryoDispatcherKey] as RPCDispatcher
 
@@ -70,7 +70,9 @@ abstract class RPCDispatcher(val ops: RPCOps, val userService: RPCUserService, v
             // representing what happened, which is useful for us to send over the wire.
             val subscription = obj.materialize().subscribe { materialised: Notification<out Any> ->
                 val newKryo = createRPCKryoForSerialization(qName, dispatcher)
-                val bits = try { MarshalledObservation(handle, materialised).serialize(newKryo) } finally {
+                val bits = try {
+                    MarshalledObservation(handle, materialised).serialize(newKryo)
+                } finally {
                     releaseRPCKryoForSerialization(newKryo)
                 }
                 rpcLog.debug("RPC sending observation: $materialised")
@@ -91,7 +93,9 @@ abstract class RPCDispatcher(val ops: RPCOps, val userService: RPCUserService, v
                 throw RPCException("Received RPC without any destination for observations, but the RPC returns observables")
 
             val kryo = createRPCKryoForSerialization(observationsTo, this)
-            val args = try { argsBytes.deserialize(kryo) } finally {
+            val args = try {
+                argsBytes.deserialize(kryo)
+            } finally {
                 releaseRPCKryoForSerialization(kryo)
             }
 
@@ -173,6 +177,7 @@ abstract class RPCDispatcher(val ops: RPCOps, val userService: RPCUserService, v
 
     // TODO remove this User once webserver doesn't need it
     private val nodeUser = User(NODE_USER, NODE_USER, setOf())
+
     @VisibleForTesting
     protected open fun getUser(message: ClientMessage): User {
         val validatedUser = message.requiredString(Message.HDR_VALIDATED_USER.toString())

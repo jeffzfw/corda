@@ -1,9 +1,10 @@
 package net.corda.demobench.web
 
 import net.corda.core.utilities.loggerFor
+import net.corda.demobench.model.NodeConfig
+import net.corda.demobench.readErrorLines
 import java.io.IOException
 import java.util.concurrent.Executors
-import net.corda.demobench.model.NodeConfig
 
 class WebServer internal constructor(private val webServerController: WebServerController) : AutoCloseable {
     private companion object {
@@ -34,13 +35,18 @@ class WebServer internal constructor(private val webServerController: WebServerC
             // Close these streams because no-one is using them.
             safeClose(p.outputStream)
             safeClose(p.inputStream)
-            safeClose(p.errorStream)
 
             executor.submit {
                 val exitValue = p.waitFor()
+                val errors = p.readErrorLines()
                 process = null
 
-                log.info("Web Server for '{}' has exited (value={})", config.legalName, exitValue)
+                if (errors.isEmpty()) {
+                    log.info("Web Server for '{}' has exited (value={})", config.legalName, exitValue)
+                } else {
+                    log.error("Web Server for '{}' has exited (value={}, {})", config.legalName, exitValue, errors)
+                }
+
                 onExit(config)
             }
         } catch (e: IOException) {

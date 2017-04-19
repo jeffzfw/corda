@@ -15,6 +15,7 @@ import net.corda.testing.MEGA_CORP
 import net.corda.testing.MEGA_CORP_PUBKEY
 import net.corda.testing.ledger
 import org.junit.Test
+import java.security.PublicKey
 import kotlin.test.*
 
 class PartialMerkleTreeTest {
@@ -83,7 +84,7 @@ class PartialMerkleTreeTest {
     fun `check full tree`() {
         val h = SecureHash.randomSHA256()
         val left = MerkleTree.Node(h, MerkleTree.Node(h, MerkleTree.Leaf(h), MerkleTree.Leaf(h)),
-                    MerkleTree.Node(h, MerkleTree.Leaf(h), MerkleTree.Leaf(h)))
+                MerkleTree.Node(h, MerkleTree.Leaf(h), MerkleTree.Leaf(h)))
         val right = MerkleTree.Node(h, MerkleTree.Leaf(h), MerkleTree.Leaf(h))
         val tree = MerkleTree.Node(h, left, right)
         assertFailsWith<MerkleTreeException> { PartialMerkleTree.build(tree, listOf(h)) }
@@ -99,10 +100,11 @@ class PartialMerkleTreeTest {
                 is TransactionState<*> -> elem.data.participants[0].keys == DUMMY_PUBKEY_1.keys
                 is Command -> MEGA_CORP_PUBKEY in elem.signers
                 is Timestamp -> true
-                is CompositeKey -> elem == MEGA_CORP_PUBKEY
+                is PublicKey -> elem == MEGA_CORP_PUBKEY
                 else -> false
             }
         }
+
         val mt = testTx.buildFilteredTransaction(::filtering)
         val leaves = mt.filteredLeaves
         val d = WireTransaction.deserialize(testTx.serialized)
@@ -127,7 +129,7 @@ class PartialMerkleTreeTest {
 
     @Test
     fun `nothing filtered`() {
-        val mt = testTx.buildFilteredTransaction( {false} )
+        val mt = testTx.buildFilteredTransaction({ false })
         assertTrue(mt.filteredLeaves.attachments.isEmpty())
         assertTrue(mt.filteredLeaves.commands.isEmpty())
         assertTrue(mt.filteredLeaves.inputs.isEmpty())
@@ -226,7 +228,7 @@ class PartialMerkleTreeTest {
                 commands = testTx.commands,
                 notary = notary,
                 signers = listOf(MEGA_CORP_PUBKEY, DUMMY_PUBKEY_1),
-                type = TransactionType.General(),
+                type = TransactionType.General,
                 timestamp = timestamp
         )
     }

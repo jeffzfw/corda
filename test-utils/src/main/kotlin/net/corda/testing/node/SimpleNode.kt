@@ -3,24 +3,23 @@ package net.corda.testing.node
 import com.codahale.metrics.MetricRegistry
 import com.google.common.net.HostAndPort
 import com.google.common.util.concurrent.SettableFuture
-import net.corda.core.crypto.composite
 import net.corda.core.crypto.generateKeyPair
 import net.corda.core.messaging.RPCOps
-import net.corda.testing.MOCK_NODE_VERSION_INFO
 import net.corda.node.services.RPCUserServiceImpl
+import net.corda.node.services.api.MonitoringService
 import net.corda.node.services.config.NodeConfiguration
 import net.corda.node.services.messaging.ArtemisMessagingServer
 import net.corda.node.services.messaging.NodeMessagingClient
 import net.corda.node.services.network.InMemoryNetworkMapCache
 import net.corda.node.utilities.AffinityExecutor.ServiceAffinityExecutor
 import net.corda.node.utilities.configureDatabase
-import net.corda.node.utilities.databaseTransaction
+import net.corda.testing.MOCK_NODE_VERSION_INFO
+import net.corda.node.utilities.transaction
 import net.corda.testing.freeLocalHostAndPort
 import org.jetbrains.exposed.sql.Database
 import java.io.Closeable
 import java.security.KeyPair
 import kotlin.concurrent.thread
-import net.corda.node.services.api.MonitoringService
 
 /**
  * This is a bare-bones node which can only send and receive messages. It doesn't register with a network map service or
@@ -30,18 +29,18 @@ class SimpleNode(val config: NodeConfiguration, val address: HostAndPort = freeL
 
     private val databaseWithCloseable: Pair<Closeable, Database> = configureDatabase(config.dataSourceProperties)
     val database: Database get() = databaseWithCloseable.second
-    val userService = RPCUserServiceImpl(config)
+    val userService = RPCUserServiceImpl(config.rpcUsers)
     val monitoringService = MonitoringService(MetricRegistry())
     val identity: KeyPair = generateKeyPair()
     val executor = ServiceAffinityExecutor(config.myLegalName, 1)
     val broker = ArtemisMessagingServer(config, address, rpcAddress, InMemoryNetworkMapCache(), userService)
     val networkMapRegistrationFuture: SettableFuture<Unit> = SettableFuture.create<Unit>()
-    val net = databaseTransaction(database) {
+    val net = database.transaction {
         NodeMessagingClient(
                 config,
                 MOCK_NODE_VERSION_INFO,
                 address,
-                identity.public.composite,
+                identity.public,
                 executor,
                 database,
                 networkMapRegistrationFuture,
@@ -51,7 +50,9 @@ class SimpleNode(val config: NodeConfiguration, val address: HostAndPort = freeL
     fun start() {
         broker.start()
         net.start(
-                object : RPCOps { override val protocolVersion = 0 },
+                object : RPCOps {
+                    override val protocolVersion = 0
+                },
                 userService)
         thread(name = config.myLegalName) {
             net.run()

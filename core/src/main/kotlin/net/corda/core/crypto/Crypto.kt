@@ -74,7 +74,7 @@ object Crypto {
             "EDDSA_ED25519_SHA512",
             "EdDSA",
             EdDSAEngine(),
-            EdDSAKeyFactory(),
+            EdDSAKeyFactory,
             net.i2p.crypto.eddsa.KeyPairGenerator(), // EdDSA engine uses a custom KeyPairGenerator Vs BouncyCastle.
             EdDSANamedCurveTable.getByName("ed25519-sha-512"),
             256,
@@ -122,7 +122,7 @@ object Crypto {
      * @return a currently supported SignatureScheme.
      * @throws IllegalArgumentException if the requested signature scheme is not supported.
      */
-    private fun findSignatureScheme(schemeCodeName: String): SignatureScheme = supportedSignatureSchemes[schemeCodeName] ?: throw IllegalArgumentException("Unsupported key/algorithm for metadata schemeCodeName: ${schemeCodeName}")
+    private fun findSignatureScheme(schemeCodeName: String): SignatureScheme = supportedSignatureSchemes[schemeCodeName] ?: throw IllegalArgumentException("Unsupported key/algorithm for metadata schemeCodeName: $schemeCodeName")
 
     /**
      * Retrieve the corresponding [SignatureScheme] based on the type of the input [KeyPair].

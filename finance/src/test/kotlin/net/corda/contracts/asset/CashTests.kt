@@ -8,13 +8,10 @@ import net.corda.core.node.services.unconsumedStates
 import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.transactions.SignedTransaction
 import net.corda.core.transactions.WireTransaction
-import net.corda.core.utilities.DUMMY_NOTARY
-import net.corda.core.utilities.DUMMY_PUBKEY_1
-import net.corda.core.utilities.DUMMY_PUBKEY_2
-import net.corda.core.utilities.LogHelper
+import net.corda.core.utilities.*
 import net.corda.node.services.vault.NodeVaultService
 import net.corda.node.utilities.configureDatabase
-import net.corda.node.utilities.databaseTransaction
+import net.corda.node.utilities.transaction
 import net.corda.testing.*
 import net.corda.testing.node.MockKeyManagementService
 import net.corda.testing.node.MockServices
@@ -24,6 +21,7 @@ import org.junit.Before
 import org.junit.Test
 import java.io.Closeable
 import java.security.KeyPair
+import java.security.PublicKey
 import java.util.*
 import kotlin.test.*
 
@@ -55,7 +53,7 @@ class CashTests {
         val dataSourceAndDatabase = configureDatabase(dataSourceProps)
         dataSource = dataSourceAndDatabase.first
         database = dataSourceAndDatabase.second
-        databaseTransaction(database) {
+        database.transaction {
             services = object : MockServices() {
                 override val keyManagementService: MockKeyManagementService = MockKeyManagementService(MINI_CORP_KEY, MEGA_CORP_KEY, OUR_KEY)
                 override val vaultService: VaultService = makeVaultService(dataSourceProps)
@@ -458,7 +456,7 @@ class CashTests {
     // Spend tx generation
 
     val OUR_KEY: KeyPair by lazy { generateKeyPair() }
-    val OUR_PUBKEY_1: CompositeKey get() = OUR_KEY.public.composite
+    val OUR_PUBKEY_1: PublicKey get() = OUR_KEY.public
 
     val THEIR_PUBKEY_1 = DUMMY_PUBKEY_2
 
@@ -484,9 +482,9 @@ class CashTests {
         return tx.toWireTransaction()
     }
 
-    fun makeSpend(amount: Amount<Currency>, dest: CompositeKey): WireTransaction {
+    fun makeSpend(amount: Amount<Currency>, dest: PublicKey): WireTransaction {
         val tx = TransactionType.General.Builder(DUMMY_NOTARY)
-        databaseTransaction(database) {
+        database.transaction {
             vault.generateSpend(tx, amount, dest)
         }
         return tx.toWireTransaction()
@@ -564,7 +562,7 @@ class CashTests {
     @Test
     fun generateSimpleDirectSpend() {
 
-        databaseTransaction(database) {
+        database.transaction {
 
             val wtx = makeSpend(100.DOLLARS, THEIR_PUBKEY_1)
 
@@ -579,7 +577,7 @@ class CashTests {
     @Test
     fun generateSimpleSpendWithParties() {
 
-        databaseTransaction(database) {
+        database.transaction {
 
             val tx = TransactionType.General.Builder(DUMMY_NOTARY)
             vault.generateSpend(tx, 80.DOLLARS, ALICE_PUBKEY, setOf(MINI_CORP.toAnonymous()))
@@ -591,7 +589,7 @@ class CashTests {
     @Test
     fun generateSimpleSpendWithChange() {
 
-        databaseTransaction(database) {
+        database.transaction {
 
             val wtx = makeSpend(10.DOLLARS, THEIR_PUBKEY_1)
 
@@ -607,7 +605,7 @@ class CashTests {
     @Test
     fun generateSpendWithTwoInputs() {
 
-        databaseTransaction(database) {
+        database.transaction {
             val wtx = makeSpend(500.DOLLARS, THEIR_PUBKEY_1)
 
             @Suppress("UNCHECKED_CAST")
@@ -623,7 +621,7 @@ class CashTests {
     @Test
     fun generateSpendMixedDeposits() {
 
-        databaseTransaction(database) {
+        database.transaction {
             val wtx = makeSpend(580.DOLLARS, THEIR_PUBKEY_1)
             assertEquals(3, wtx.inputs.size)
 
@@ -644,7 +642,7 @@ class CashTests {
     @Test
     fun generateSpendInsufficientBalance() {
 
-        databaseTransaction(database) {
+        database.transaction {
 
             val e: InsufficientBalanceException = assertFailsWith("balance") {
                 makeSpend(1000.DOLLARS, THEIR_PUBKEY_1)

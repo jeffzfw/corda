@@ -44,17 +44,21 @@ import java.util.concurrent.atomic.AtomicInteger
 interface VerifierExposedDSLInterface : DriverDSLExposedInterface {
     /** Starts a lightweight verification requestor that implements the Node's Verifier API */
     fun startVerificationRequestor(name: String): ListenableFuture<VerificationRequestorHandle>
+
     /** Starts an out of process verifier connected to [address] */
     fun startVerifier(address: HostAndPort): ListenableFuture<VerifierHandle>
+
     /**
      * Waits until [number] verifiers are listening for verification requests coming from the Node. Check
      * [VerificationRequestorHandle.waitUntilNumberOfVerifiers] for an equivalent for requestors.
      */
     fun NodeHandle.waitUntilNumberOfVerifiers(number: Int)
 }
+
 /** Starts a verifier connecting to the specified node */
 fun VerifierExposedDSLInterface.startVerifier(nodeHandle: NodeHandle) =
         startVerifier(nodeHandle.configuration.p2pAddress)
+
 /** Starts a verifier connecting to the specified requestor */
 fun VerifierExposedDSLInterface.startVerifier(verificationRequestorHandle: VerificationRequestorHandle) =
         startVerifier(verificationRequestorHandle.p2pAddress)
@@ -68,7 +72,6 @@ fun <A> verifierDriver(
         isDebug: Boolean = false,
         driverDirectory: Path = Paths.get("build", getTimestampAsDirectoryName()),
         portAllocation: PortAllocation = PortAllocation.Incremental(10000),
-        sshdPortAllocation: PortAllocation = PortAllocation.Incremental(20000),
         debugPortAllocation: PortAllocation = PortAllocation.Incremental(5005),
         systemProperties: Map<String, String> = emptyMap(),
         useTestClock: Boolean = false,
@@ -78,7 +81,6 @@ fun <A> verifierDriver(
         driverDsl = VerifierDriverDSL(
                 DriverDSL(
                         portAllocation = portAllocation,
-                        sshdPortAllocation = sshdPortAllocation,
                         debugPortAllocation = debugPortAllocation,
                         systemProperties = systemProperties,
                         driverDirectory = driverDirectory.toAbsolutePath(),
@@ -192,6 +194,7 @@ data class VerifierDriverDSL(
         val securityManager = object : ActiveMQSecurityManager {
             // We don't need auth, SSL is good enough
             override fun validateUser(user: String?, password: String?) = true
+
             override fun validateUserAndRole(user: String?, password: String?, roles: MutableSet<Role>?, checkType: CheckType?) = true
         }
 
@@ -260,10 +263,8 @@ data class VerifierDriverDSL(
         val locator = ActiveMQClient.createServerLocatorWithoutHA(transport)
         val sessionFactory = locator.createSessionFactory()
         val session = sessionFactory.createSession(NODE_USER, NODE_USER, false, true, true, locator.isPreAcknowledge, locator.ackBatchSize)
-        try {
-            return closure(session)
-        } finally {
-            session.close()
+        return session.use {
+            closure(it)
         }
     }
 

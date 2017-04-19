@@ -1,9 +1,11 @@
 package net.corda.node.services.vault
+
 import net.corda.core.contracts.StateRef
 import net.corda.core.flows.FlowLogic
 import net.corda.core.flows.StateMachineRunId
 import net.corda.core.node.services.VaultService
 import net.corda.core.utilities.loggerFor
+import net.corda.core.utilities.trace
 import net.corda.node.services.statemachine.StateMachineManager
 import net.corda.node.utilities.AddOrRemove
 import java.util.*
@@ -17,12 +19,12 @@ class VaultSoftLockManager(val vault: VaultService, smm: StateMachineManager) {
     private val trackingFlowIds: MutableSet<UUID> = Collections.synchronizedSet(HashSet())
 
     init {
-        smm.changes.subscribe { change ->
-            if (change.addOrRemove == AddOrRemove.REMOVE && trackingFlowIds.contains(change.id.uuid)) {
-                log.trace( "${change.addOrRemove} Flow name ${change.logic.javaClass} with id ${change.id}")
-                unregisterSoftLocks(change.id, change.logic)
+        smm.changes.subscribe { (logic, addOrRemove, id) ->
+            if (addOrRemove == AddOrRemove.REMOVE && id.uuid in trackingFlowIds) {
+                log.trace { "$addOrRemove Flow name ${logic.javaClass} with id $id" }
+                unregisterSoftLocks(id, logic)
             }
-            trackingFlowIds.remove(change.id.uuid)
+            trackingFlowIds.remove(id.uuid)
         }
 
         // Discussion

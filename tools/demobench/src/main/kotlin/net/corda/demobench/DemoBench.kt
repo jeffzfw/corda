@@ -2,8 +2,9 @@ package net.corda.demobench
 
 import javafx.scene.image.Image
 import net.corda.demobench.views.DemoBenchView
-import tornadofx.App
-import tornadofx.addStageIcon
+import tornadofx.*
+import java.io.InputStreamReader
+import java.nio.charset.StandardCharsets.UTF_8
 
 /**
  * README!
@@ -49,3 +50,5 @@ class DemoBench : App(DemoBenchView::class) {
         addStageIcon(Image("cordalogo.png"))
     }
 }
+
+fun Process.readErrorLines(): List<String> = InputStreamReader(this.errorStream, UTF_8).readLines()

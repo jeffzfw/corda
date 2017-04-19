@@ -1,17 +1,18 @@
 package net.corda.demobench.views
 
-import java.nio.file.Path
-import java.text.DecimalFormat
-import java.util.*
 import javafx.application.Platform
 import javafx.scene.control.SelectionMode.MULTIPLE
 import javafx.scene.input.KeyCode
 import javafx.scene.layout.Pane
 import javafx.stage.FileChooser
 import javafx.util.converter.NumberStringConverter
+import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.demobench.model.*
 import net.corda.demobench.ui.CloseableTab
 import tornadofx.*
+import java.nio.file.Path
+import java.text.DecimalFormat
+import java.util.*
 
 class NodeTabView : Fragment() {
     override val root = stackpane {}
@@ -70,7 +71,7 @@ class NodeTabView : Fragment() {
                     }
                 }
 
-                fieldset("Cordapps") {
+                fieldset("CorDapps") {
                     styleClass.addAll("cordapps-panel")
 
                     listview(cordapps) {
@@ -81,7 +82,7 @@ class NodeTabView : Fragment() {
                             key.consume()
                         }
                     }
-                    button("Add Cordapp") {
+                    button("Add CorDapp") {
                         setOnAction {
                             val app = (chooser.showOpenDialog(null) ?: return@setOnAction).toPath()
                             if (!cordapps.contains(app)) {
@@ -115,15 +116,15 @@ class NodeTabView : Fragment() {
         root.add(nodeConfigView)
         root.add(nodeTerminalView)
 
-        model.legalName.value = if (nodeController.hasNetworkMap()) "" else "Notary"
+        model.legalName.value = if (nodeController.hasNetworkMap()) "" else DUMMY_NOTARY.name
         model.p2pPort.value = nodeController.nextPort
         model.rpcPort.value = nodeController.nextPort
         model.webPort.value = nodeController.nextPort
         model.h2Port.value = nodeController.nextPort
 
-        chooser.title = "Cordapps"
+        chooser.title = "CorDapps"
         chooser.initialDirectory = jvm.dataHome.toFile()
-        chooser.extensionFilters.add(FileChooser.ExtensionFilter("Cordapps (*.jar)", "*.jar", "*.JAR"))
+        chooser.extensionFilters.add(FileChooser.ExtensionFilter("CorDapps (*.jar)", "*.jar", "*.JAR"))
     }
 
     private fun Pane.nodeNameField() = textfield(model.legalName) {

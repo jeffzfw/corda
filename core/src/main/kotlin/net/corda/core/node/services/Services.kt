@@ -6,6 +6,7 @@ import net.corda.core.contracts.*
 import net.corda.core.crypto.*
 import net.corda.core.flows.FlowException
 import net.corda.core.serialization.CordaSerializable
+import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.toFuture
 import net.corda.core.transactions.LedgerTransaction
 import net.corda.core.transactions.TransactionBuilder
@@ -203,8 +204,8 @@ interface VaultService {
     @Suspendable
     fun generateSpend(tx: TransactionBuilder,
                       amount: Amount<Currency>,
-                      to: CompositeKey,
-                      onlyFromParties: Set<AbstractParty>? = null): Pair<TransactionBuilder, List<CompositeKey>>
+                      to: PublicKey,
+                      onlyFromParties: Set<AbstractParty>? = null): Pair<TransactionBuilder, List<PublicKey>>
 
     // DOCSTART VaultStatesQuery
     /**
@@ -253,13 +254,13 @@ interface VaultService {
      * is implemented in a separate module (finance) and requires access to it.
      */
     @Suspendable
-    fun <T : ContractState> unconsumedStatesForSpending(amount: Amount<Currency>, onlyFromIssuerParties: Set<AbstractParty>? = null, notary: Party? = null, lockId: UUID): List<StateAndRef<T>>
+    fun <T : ContractState> unconsumedStatesForSpending(amount: Amount<Currency>, onlyFromIssuerParties: Set<AbstractParty>? = null, notary: Party? = null, lockId: UUID, withIssuerRefs: Set<OpaqueBytes>? = null): List<StateAndRef<T>>
 }
 
-inline fun <reified T: ContractState> VaultService.unconsumedStates(includeSoftLockedStates: Boolean = true): Iterable<StateAndRef<T>> =
+inline fun <reified T : ContractState> VaultService.unconsumedStates(includeSoftLockedStates: Boolean = true): Iterable<StateAndRef<T>> =
         states(setOf(T::class.java), EnumSet.of(Vault.StateStatus.UNCONSUMED), includeSoftLockedStates)
 
-inline fun <reified T: ContractState> VaultService.consumedStates(): Iterable<StateAndRef<T>> =
+inline fun <reified T : ContractState> VaultService.consumedStates(): Iterable<StateAndRef<T>> =
         states(setOf(T::class.java), EnumSet.of(Vault.StateStatus.CONSUMED))
 
 /** Returns the [linearState] heads only when the type of the state would be considered an 'instanceof' the given type. */
@@ -287,11 +288,19 @@ interface KeyManagementService {
     /** Returns a snapshot of the current pubkey->privkey mapping. */
     val keys: Map<PublicKey, PrivateKey>
 
+    @Throws(IllegalStateException::class)
     fun toPrivate(publicKey: PublicKey) = keys[publicKey] ?: throw IllegalStateException("No private key known for requested public key ${publicKey.toStringShort()}")
 
-    fun toKeyPair(publicKey: PublicKey) = KeyPair(publicKey, toPrivate(publicKey))
+    @Throws(IllegalArgumentException::class)
+    fun toKeyPair(publicKey: PublicKey): KeyPair {
+        when (publicKey) {
+            is CompositeKey -> throw IllegalArgumentException("Got CompositeKey when single PublicKey expected.")
+            else -> return KeyPair(publicKey, toPrivate(publicKey))
+        }
+    }
 
     /** Returns the first [KeyPair] matching any of the [publicKeys] */
+    @Throws(IllegalArgumentException::class)
     fun toKeyPair(publicKeys: Iterable<PublicKey>) = publicKeys.first { keys.contains(it) }.let { toKeyPair(it) }
 
     /** Generates a new random key and adds it to the exposed map. */

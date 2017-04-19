@@ -2,8 +2,10 @@ package net.corda.contracts.clause
 
 import net.corda.core.contracts.*
 import net.corda.core.contracts.clauses.Clause
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.transactions.TransactionBuilder
+import java.security.PublicKey
+import net.corda.core.utilities.loggerFor
+import net.corda.core.utilities.trace
 import java.util.*
 
 /**
@@ -12,6 +14,11 @@ import java.util.*
  * errors on no-match, ends on match.
  */
 abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T : Any> : Clause<S, C, Issued<T>>() {
+
+    private companion object {
+        val log = loggerFor<AbstractConserveAmount<*, *, *>>()
+    }
+
     /**
      * Gather assets from the given list of states, sufficient to match or exceed the given amount.
      *
@@ -22,6 +29,7 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
     @Throws(InsufficientBalanceException::class)
     private fun gatherCoins(acceptableCoins: Collection<StateAndRef<S>>,
                             amount: Amount<T>): Pair<ArrayList<StateAndRef<S>>, Amount<T>> {
+        require(amount.quantity > 0) { "Cannot gather zero coins" }
         val gathered = arrayListOf<StateAndRef<S>>()
         var gatheredAmount = Amount(0, amount.token)
         for (c in acceptableCoins) {
@@ -30,9 +38,12 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
             gatheredAmount += Amount(c.state.data.amount.quantity, amount.token)
         }
 
-        if (gatheredAmount < amount)
+        if (gatheredAmount < amount) {
+            log.trace { "Insufficient balance: requested $amount, available $gatheredAmount" }
             throw InsufficientBalanceException(amount - gatheredAmount)
+        }
 
+        log.trace { "Gathered coins: requested $amount, available $gatheredAmount, change: ${gatheredAmount - amount}" }
         return Pair(gathered, gatheredAmount)
     }
 
@@ -48,9 +59,9 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
     @Throws(InsufficientBalanceException::class)
     fun generateExit(tx: TransactionBuilder, amountIssued: Amount<Issued<T>>,
                      assetStates: List<StateAndRef<S>>,
-                     deriveState: (TransactionState<S>, Amount<Issued<T>>, CompositeKey) -> TransactionState<S>,
+                     deriveState: (TransactionState<S>, Amount<Issued<T>>, PublicKey) -> TransactionState<S>,
                      generateMoveCommand: () -> CommandData,
-                     generateExitCommand: (Amount<Issued<T>>) -> CommandData): CompositeKey {
+                     generateExitCommand: (Amount<Issued<T>>) -> CommandData): PublicKey {
         val owner = assetStates.map { it.state.data.owner }.toSet().singleOrNull() ?: throw InsufficientBalanceException(amountIssued)
         val currency = amountIssued.token.product
         val amount = Amount(amountIssued.quantity, currency)
@@ -61,7 +72,7 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
         // highest total value
         acceptableCoins = acceptableCoins.filter { it.state.notary == tx.notary }
 
-        val (gathered, gatheredAmount) = gatherCoins(acceptableCoins, Amount(amount.quantity, currency))
+        val (gathered, gatheredAmount) = gatherCoins(acceptableCoins, amount)
         val takeChangeFrom = gathered.lastOrNull()
         val change = if (takeChangeFrom != null && gatheredAmount > amount) {
             Amount(gatheredAmount.quantity - amount.quantity, takeChangeFrom.state.data.amount.token)
@@ -93,13 +104,13 @@ abstract class AbstractConserveAmount<S : FungibleAsset<T>, C : CommandData, T :
         val outputAmount: Amount<Issued<T>> = outputs.sumFungibleOrZero(groupingKey)
 
         // If we want to remove assets from the ledger, that must be signed for by the issuer and owner.
-        val exitKeys: Set<CompositeKey> = inputs.flatMap { it.exitKeys }.toSet()
+        val exitKeys: Set<PublicKey> = inputs.flatMap { it.exitKeys }.toSet()
         val exitCommand = matchedCommands.select<FungibleAsset.Commands.Exit<T>>(parties = null, signers = exitKeys).filter { it.value.amount.token == groupingKey }.singleOrNull()
         val amountExitingLedger: Amount<Issued<T>> = exitCommand?.value?.amount ?: Amount(0, groupingKey)
 
         requireThat {
-            "there are no zero sized inputs" by inputs.none { it.amount.quantity == 0L }
-            "for reference ${deposit.reference} at issuer ${deposit.party} the amounts balance: ${inputAmount.quantity} - ${amountExitingLedger.quantity} != ${outputAmount.quantity}" by
+            "there are no zero sized inputs" using inputs.none { it.amount.quantity == 0L }
+            "for reference ${deposit.reference} at issuer ${deposit.party} the amounts balance: ${inputAmount.quantity} - ${amountExitingLedger.quantity} != ${outputAmount.quantity}" using
                     (inputAmount == outputAmount + amountExitingLedger)
         }
 

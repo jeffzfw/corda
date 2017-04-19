@@ -1,7 +1,7 @@
 @file:JvmName("Driver")
+
 package net.corda.node.driver
 
-import co.paralleluniverse.common.util.ProcessUtil
 import com.google.common.net.HostAndPort
 import com.google.common.util.concurrent.*
 import com.typesafe.config.Config
@@ -16,8 +16,7 @@ import net.corda.core.messaging.CordaRPCOps
 import net.corda.core.node.NodeInfo
 import net.corda.core.node.services.ServiceInfo
 import net.corda.core.node.services.ServiceType
-import net.corda.core.utilities.ProcessUtilities
-import net.corda.core.utilities.loggerFor
+import net.corda.core.utilities.*
 import net.corda.node.LOGS_DIRECTORY_NAME
 import net.corda.node.services.config.ConfigHelper
 import net.corda.node.services.config.FullNodeConfiguration
@@ -28,6 +27,7 @@ import net.corda.node.utilities.ServiceIdentityGenerator
 import net.corda.nodeapi.ArtemisMessagingComponent
 import net.corda.nodeapi.User
 import net.corda.nodeapi.config.SSLConfiguration
+import net.corda.nodeapi.config.parseAs
 import okhttp3.OkHttpClient
 import okhttp3.Request
 import org.slf4j.Logger
@@ -59,7 +59,7 @@ private val log: Logger = loggerFor<DriverDSL>()
  */
 interface DriverDSLExposedInterface {
     /**
-     * Starts a [Node] in a separate process.
+     * Starts a [net.corda.node.internal.Node] in a separate process.
      *
      * @param providedName Optional name of the node, which will be its legal name in [Party]. Defaults to something
      *   random. Note that this must be unique as the driver uses it as a primary key!
@@ -116,6 +116,7 @@ data class NodeHandle(
         val nodeInfo: NodeInfo,
         val rpc: CordaRPCOps,
         val configuration: FullNodeConfiguration,
+        val webAddress: HostAndPort,
         val process: Process
 ) {
     fun rpcClientToNode(): CordaRPCClient = CordaRPCClient(configuration.rpcAddress!!)
@@ -143,8 +144,8 @@ sealed class PortAllocation {
 /**
  * [driver] allows one to start up nodes like this:
  *   driver {
- *     val noService = startNode("NoService")
- *     val notary = startNode("Notary")
+ *     val noService = startNode(DUMMY_BANK_A.name)
+ *     val notary = startNode(DUMMY_NOTARY.name)
  *
  *     (...)
  *   }
@@ -170,7 +171,6 @@ fun <A> driver(
         isDebug: Boolean = false,
         driverDirectory: Path = Paths.get("build", getTimestampAsDirectoryName()),
         portAllocation: PortAllocation = PortAllocation.Incremental(10000),
-        sshdPortAllocation: PortAllocation = PortAllocation.Incremental(20000),
         debugPortAllocation: PortAllocation = PortAllocation.Incremental(5005),
         systemProperties: Map<String, String> = emptyMap(),
         useTestClock: Boolean = false,
@@ -179,7 +179,6 @@ fun <A> driver(
 ) = genericDriver(
         driverDsl = DriverDSL(
                 portAllocation = portAllocation,
-                sshdPortAllocation = sshdPortAllocation,
                 debugPortAllocation = debugPortAllocation,
                 systemProperties = systemProperties,
                 driverDirectory = driverDirectory.toAbsolutePath(),
@@ -288,6 +287,7 @@ class ShutdownManager(private val executorService: ExecutorService) {
         val registeredShutdowns = ArrayList<ListenableFuture<() -> Unit>>()
         var isShutdown = false
     }
+
     private val state = ThreadBox(State())
 
     fun shutdown() {
@@ -303,7 +303,7 @@ class ShutdownManager(private val executorService: ExecutorService) {
             /** Could not get all of them, collect what we have */
             shutdownFutures.filter { it.isDone }.map { it.get() }
         }
-        shutdowns.reversed().forEach{ it() }
+        shutdowns.reversed().forEach { it() }
     }
 
     fun registerShutdown(shutdown: ListenableFuture<() -> Unit>) {
@@ -336,7 +336,6 @@ class ShutdownManager(private val executorService: ExecutorService) {
 
 class DriverDSL(
         val portAllocation: PortAllocation,
-        val sshdPortAllocation: PortAllocation,
         val debugPortAllocation: PortAllocation,
         val systemProperties: Map<String, String>,
         val driverDirectory: Path,
@@ -344,7 +343,7 @@ class DriverDSL(
         val isDebug: Boolean,
         val automaticallyStartNetworkMap: Boolean
 ) : DriverDSLInternalInterface {
-    private val networkMapLegalName = "NetworkMapService"
+    private val networkMapLegalName = DUMMY_MAP.name
     private val networkMapAddress = portAllocation.nextHostAndPort()
     val executorService: ListeningScheduledExecutorService = MoreExecutors.listeningDecorator(Executors.newScheduledThreadPool(2))
     val shutdownManager = ShutdownManager(executorService)
@@ -425,7 +424,7 @@ class DriverDSL(
                 "useTestClock" to useTestClock,
                 "rpcUsers" to rpcUsers.map {
                     mapOf(
-                            "user" to it.username,
+                            "username" to it.username,
                             "password" to it.password,
                             "permissions" to it.permissions
                     )
@@ -433,22 +432,19 @@ class DriverDSL(
                 "verifierType" to verifierType.name
         ) + customOverrides
 
-        val configuration = FullNodeConfiguration(
-                baseDirectory,
-                ConfigHelper.loadConfig(
-                        baseDirectory = baseDirectory,
-                        allowMissingConfig = true,
-                        configOverrides = configOverrides
-                )
-        )
+        val config = ConfigHelper.loadConfig(
+                baseDirectory = baseDirectory,
+                allowMissingConfig = true,
+                configOverrides = configOverrides)
+        val configuration = config.parseAs<FullNodeConfiguration>()
 
-        val processFuture = startNode(executorService, configuration, quasarJarPath, debugPort, systemProperties)
+        val processFuture = startNode(executorService, configuration, config, quasarJarPath, debugPort, systemProperties)
         registerProcess(processFuture)
         return processFuture.flatMap { process ->
             // We continue to use SSL enabled port for RPC when its for node user.
             establishRpc(p2pAddress, configuration).flatMap { rpc ->
                 rpc.waitUntilRegisteredWithNetworkMap().map {
-                    NodeHandle(rpc.nodeIdentity(), rpc, configuration, process)
+                    NodeHandle(rpc.nodeIdentity(), rpc, configuration, webAddress, process)
                 }
             }
         }
@@ -461,7 +457,7 @@ class DriverDSL(
             verifierType: VerifierType,
             rpcUsers: List<User>
     ): ListenableFuture<Pair<Party, List<NodeHandle>>> {
-        val nodeNames = (1..clusterSize).map { "Notary Node $it" }
+        val nodeNames = (1..clusterSize).map { "${DUMMY_NOTARY.name} $it" }
         val paths = nodeNames.map { driverDirectory / it }
         ServiceIdentityGenerator.generateToDisk(paths, type.id, notaryName)
 
@@ -486,34 +482,29 @@ class DriverDSL(
         }
     }
 
-    private fun queryWebserver(configuration: FullNodeConfiguration, process: Process): HostAndPort? {
-        val protocol = if (configuration.useHTTPS) {
-            "https://"
-        } else {
-            "http://"
-        }
-        val url = URL(protocol + configuration.webAddress.toString() + "/api/status")
-        val client = OkHttpClient.Builder().connectTimeout(5, TimeUnit.SECONDS).readTimeout(60, TimeUnit.SECONDS).build()
+    private fun queryWebserver(handle: NodeHandle, process: Process): HostAndPort {
+        val protocol = if (handle.configuration.useHTTPS) "https://" else "http://"
+        val url = URL("$protocol${handle.webAddress}/api/status")
+        val client = OkHttpClient.Builder().connectTimeout(5, SECONDS).readTimeout(60, SECONDS).build()
 
         while (process.isAlive) try {
             val response = client.newCall(Request.Builder().url(url).build()).execute()
             if (response.isSuccessful && (response.body().string() == "started")) {
-                return configuration.webAddress
+                return handle.webAddress
             }
         } catch(e: ConnectException) {
-            log.debug("Retrying webserver info at ${configuration.webAddress}")
+            log.debug("Retrying webserver info at ${handle.webAddress}")
         }
 
-        log.error("Webserver at ${configuration.webAddress} has died")
-        return null
+        throw IllegalStateException("Webserver at ${handle.webAddress} has died")
     }
 
     override fun startWebserver(handle: NodeHandle): ListenableFuture<HostAndPort> {
         val debugPort = if (isDebug) debugPortAllocation.nextPort() else null
-        val process = DriverDSL.startWebserver(executorService, handle.configuration, debugPort)
+        val process = DriverDSL.startWebserver(executorService, handle, debugPort)
         registerProcess(process)
         return process.map {
-            queryWebserver(handle.configuration, it)!!
+            queryWebserver(handle, it)
         }
     }
 
@@ -526,7 +517,6 @@ class DriverDSL(
     override fun startNetworkMapService() {
         val debugPort = if (isDebug) debugPortAllocation.nextPort() else null
         val apiAddress = portAllocation.nextHostAndPort().toString()
-        val sshdAddress = sshdPortAllocation.nextHostAndPort().toString()
         val baseDirectory = driverDirectory / networkMapLegalName
         val config = ConfigHelper.loadConfig(
                 baseDirectory = baseDirectory,
@@ -542,15 +532,15 @@ class DriverDSL(
         )
 
         log.info("Starting network-map-service")
-        val startNode = startNode(executorService, FullNodeConfiguration(baseDirectory, config), quasarJarPath, debugPort, systemProperties)
+        val startNode = startNode(executorService, config.parseAs<FullNodeConfiguration>(), config, quasarJarPath, debugPort, systemProperties)
         registerProcess(startNode)
     }
 
     companion object {
         val name = arrayOf(
-                "Alice",
-                "Bob",
-                "Bank"
+                ALICE.name,
+                BOB.name,
+                DUMMY_BANK_A.name
         )
 
         fun <A> pickA(array: Array<A>): A = array[Math.abs(Random().nextInt()) % array.size]
@@ -558,13 +548,14 @@ class DriverDSL(
         private fun startNode(
                 executorService: ListeningScheduledExecutorService,
                 nodeConf: FullNodeConfiguration,
+                config: Config,
                 quasarJarPath: String,
                 debugPort: Int?,
                 overriddenSystemProperties: Map<String, String>
         ): ListenableFuture<Process> {
             return executorService.submit<Process> {
                 // Write node.conf
-                writeConfig(nodeConf.baseDirectory, "node.conf", nodeConf.config)
+                writeConfig(nodeConf.baseDirectory, "node.conf", config)
 
                 val systemProperties = mapOf(
                         "name" to nodeConf.myLegalName,
@@ -581,6 +572,7 @@ class DriverDSL(
                                 "--logging-level=$loggingLevel",
                                 "--no-local-shell"
                         ),
+                        jdwpPort = debugPort,
                         extraJvmArguments = extraJvmArguments,
                         errorLogPath = nodeConf.baseDirectory / LOGS_DIRECTORY_NAME / "error.log",
                         workingDirectory = nodeConf.baseDirectory
@@ -590,19 +582,19 @@ class DriverDSL(
 
         private fun startWebserver(
                 executorService: ListeningScheduledExecutorService,
-                nodeConf: FullNodeConfiguration,
+                handle: NodeHandle,
                 debugPort: Int?
         ): ListenableFuture<Process> {
             return executorService.submit<Process> {
                 val className = "net.corda.webserver.WebServer"
                 ProcessUtilities.startJavaProcess(
                         className = className, // cannot directly get class for this, so just use string
-                        arguments = listOf("--base-directory", nodeConf.baseDirectory.toString()),
+                        arguments = listOf("--base-directory", handle.configuration.baseDirectory.toString()),
                         jdwpPort = debugPort,
-                        extraJvmArguments = listOf("-Dname=node-${nodeConf.p2pAddress}-webserver"),
+                        extraJvmArguments = listOf("-Dname=node-${handle.configuration.p2pAddress}-webserver"),
                         errorLogPath = Paths.get("error.$className.log")
                 )
-            }.flatMap { process -> addressMustBeBound(executorService, nodeConf.webAddress).map { process } }
+            }.flatMap { process -> addressMustBeBound(executorService, handle.webAddress).map { process } }
         }
     }
 }

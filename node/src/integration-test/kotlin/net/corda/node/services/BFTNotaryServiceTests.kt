@@ -9,6 +9,7 @@ import net.corda.core.div
 import net.corda.core.getOrThrow
 import net.corda.core.node.services.ServiceInfo
 import net.corda.core.node.services.ServiceType
+import net.corda.core.utilities.ALICE
 import net.corda.flows.NotaryError
 import net.corda.flows.NotaryException
 import net.corda.flows.NotaryFlow
@@ -16,7 +17,7 @@ import net.corda.node.internal.AbstractNode
 import net.corda.node.internal.Node
 import net.corda.node.services.transactions.BFTNonValidatingNotaryService
 import net.corda.node.utilities.ServiceIdentityGenerator
-import net.corda.node.utilities.databaseTransaction
+import net.corda.node.utilities.transaction
 import net.corda.testing.node.NodeBasedTest
 import org.junit.Test
 import java.security.KeyPair
@@ -30,11 +31,11 @@ class BFTNotaryServiceTests : NodeBasedTest() {
     @Test
     fun `detect double spend`() {
         val masterNode = startBFTNotaryCluster(notaryName, 4, BFTNonValidatingNotaryService.type).first()
-        val alice = startNode("Alice").getOrThrow()
+        val alice = startNode(ALICE.name).getOrThrow()
 
         val notaryParty = alice.netMapCache.getNotary(notaryName)!!
-        val notaryNodeKeyPair = databaseTransaction(masterNode.database) { masterNode.services.notaryIdentityKey }
-        val aliceKey = databaseTransaction(alice.database) { alice.services.legalIdentityKey }
+        val notaryNodeKeyPair = with(masterNode) { database.transaction { services.notaryIdentityKey } }
+        val aliceKey = with(alice) { database.transaction { services.legalIdentityKey } }
 
         val inputState = issueState(alice, notaryParty, notaryNodeKeyPair)
 
@@ -60,7 +61,7 @@ class BFTNotaryServiceTests : NodeBasedTest() {
     }
 
     private fun issueState(node: AbstractNode, notary: Party, notaryKey: KeyPair): StateAndRef<*> {
-        return databaseTransaction(node.database) {
+        return node.database.transaction {
             val tx = DummyContract.generateInitial(Random().nextInt(), notary, node.info.legalIdentity.ref(0))
             tx.signWith(node.services.legalIdentityKey)
             tx.signWith(notaryKey)

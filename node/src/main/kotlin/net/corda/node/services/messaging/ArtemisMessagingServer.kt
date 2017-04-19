@@ -4,16 +4,13 @@ import com.google.common.net.HostAndPort
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import io.netty.handler.ssl.SslHandler
-import net.corda.core.ThreadBox
+import net.corda.core.*
 import net.corda.core.crypto.*
 import net.corda.core.crypto.X509Utilities.CORDA_CLIENT_CA
 import net.corda.core.crypto.X509Utilities.CORDA_ROOT_CA
-import net.corda.core.div
-import net.corda.core.minutes
 import net.corda.core.node.NodeInfo
 import net.corda.core.node.services.NetworkMapCache
 import net.corda.core.node.services.NetworkMapCache.MapChange
-import net.corda.core.seconds
 import net.corda.core.utilities.debug
 import net.corda.core.utilities.loggerFor
 import net.corda.node.printBasicNodeInfo
@@ -50,6 +47,7 @@ import rx.Subscription
 import java.io.IOException
 import java.math.BigInteger
 import java.security.KeyStore
+import java.security.KeyStoreException
 import java.security.Principal
 import java.util.*
 import java.util.concurrent.Executor
@@ -89,6 +87,8 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
                              val userService: RPCUserService) : ArtemisMessagingComponent() {
     companion object {
         private val log = loggerFor<ArtemisMessagingServer>()
+        /** 10 MiB maximum allowed file size for attachments, including message headers. TODO: acquire this value from Network Map when supported. */
+        @JvmStatic val MAX_FILE_SIZE = 10485760
     }
 
     private class InnerState {
@@ -113,6 +113,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
      * The server will make sure the bridge exists on network map changes, see method [updateBridgesOnNetworkChange]
      * We assume network map will be updated accordingly when the client node register with the network map server.
      */
+    @Throws(IOException::class, KeyStoreException::class)
     fun start() = mutex.locked {
         if (!running) {
             configureAndStartServer()
@@ -130,6 +131,9 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
         running = false
     }
 
+    // TODO: Maybe wrap [IOException] on a key store load error so that it's clearly splitting key store loading from
+    // Artemis IO errors
+    @Throws(IOException::class, KeyStoreException::class)
     private fun configureAndStartServer() {
         val config = createArtemisConfig()
         val securityManager = createArtemisSecurityManager()
@@ -166,6 +170,9 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
         idCacheSize = 2000 // Artemis Default duplicate cache size i.e. a guess
         isPersistIDCache = true
         isPopulateValidatedUser = true
+        journalBufferSize_NIO = MAX_FILE_SIZE // Artemis default is 490KiB - required to address IllegalArgumentException (when Artemis uses Java NIO): Record is too large to store.
+        journalBufferSize_AIO = MAX_FILE_SIZE // Required to address IllegalArgumentException (when Artemis uses Linux Async IO): Record is too large to store.
+        journalFileSize = MAX_FILE_SIZE // The size of each journal file in bytes. Artemis default is 10MiB.
         managementNotificationAddress = SimpleString(NOTIFICATIONS_ADDRESS)
         // Artemis allows multiple servers to be grouped together into a cluster for load balancing purposes. The cluster
         // user is used for connecting the nodes together. It has super-user privileges and so it's imperative that its
@@ -225,6 +232,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
                 deleteNonDurableQueue, manage, browse)
     }
 
+    @Throws(IOException::class, KeyStoreException::class)
     private fun createArtemisSecurityManager(): ActiveMQJAASSecurityManager {
         val ourCertificate = X509Utilities
                 .loadCertificateFromKeyStore(config.keyStoreFile, config.keyStorePassword, CORDA_CLIENT_CA)
@@ -240,8 +248,9 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
         )
         val keyStore = X509Utilities.loadKeyStore(config.keyStoreFile, config.keyStorePassword)
         val trustStore = X509Utilities.loadKeyStore(config.trustStoreFile, config.trustStorePassword)
-        val certChecks = defaultCertPolicies.mapValues {
-            (config.certificateChainCheckPolicies[it.key] ?: it.value).createCheck(keyStore, trustStore)
+        val certChecks = defaultCertPolicies.mapValues { (role, defaultPolicy) ->
+            val configPolicy = config.certificateChainCheckPolicies.noneOrSingle { it.role == role }?.certificateChainCheckPolicy
+            (configPolicy ?: defaultPolicy).createCheck(keyStore, trustStore)
         }
         val securityConfig = object : SecurityConfiguration() {
             // Override to make it work with our login module
@@ -270,7 +279,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
 
         when {
             queueName.startsWith(PEERS_PREFIX) -> try {
-                val identity = CompositeKey.parseFromBase58(queueName.substring(PEERS_PREFIX.length))
+                val identity = parsePublicKeyBase58(queueName.substring(PEERS_PREFIX.length))
                 val nodeInfo = networkMapCache.getNodeByLegalIdentityKey(identity)
                 if (nodeInfo != null) {
                     deployBridgeToPeer(nodeInfo)
@@ -282,7 +291,7 @@ class ArtemisMessagingServer(override val config: NodeConfiguration,
             }
 
             queueName.startsWith(SERVICES_PREFIX) -> try {
-                val identity = CompositeKey.parseFromBase58(queueName.substring(SERVICES_PREFIX.length))
+                val identity = parsePublicKeyBase58(queueName.substring(SERVICES_PREFIX.length))
                 val nodeInfos = networkMapCache.getNodesByAdvertisedServiceIdentityKey(identity)
                 // Create a bridge for each node advertising the service.
                 for (nodeInfo in nodeInfos) {
@@ -502,7 +511,7 @@ sealed class CertificateChainCheckPolicy {
         }
     }
 
-    class MustContainOneOf(val trustedAliases: Set<String>) : CertificateChainCheckPolicy() {
+    data class MustContainOneOf(val trustedAliases: Set<String>) : CertificateChainCheckPolicy() {
         override fun createCheck(keyStore: KeyStore, trustStore: KeyStore): Check {
             val trustedPublicKeys = trustedAliases.map { trustStore.getCertificate(it).publicKey }.toSet()
             return object : Check {

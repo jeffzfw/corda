@@ -6,7 +6,6 @@ import com.google.common.util.concurrent.Futures
 import com.google.common.util.concurrent.ListenableFuture
 import com.google.common.util.concurrent.SettableFuture
 import com.typesafe.config.ConfigFactory.empty
-import net.corda.core.crypto.composite
 import net.corda.core.crypto.generateKeyPair
 import net.corda.core.messaging.Message
 import net.corda.core.messaging.RPCOps
@@ -16,7 +15,6 @@ import net.corda.core.utilities.LogHelper
 import net.corda.node.services.RPCUserService
 import net.corda.node.services.RPCUserServiceImpl
 import net.corda.node.services.api.MonitoringService
-import net.corda.node.services.config.FullNodeConfiguration
 import net.corda.node.services.config.NodeConfiguration
 import net.corda.node.services.config.configureWithDevSSLCertificate
 import net.corda.node.services.network.InMemoryNetworkMapCache
@@ -24,7 +22,7 @@ import net.corda.node.services.network.NetworkMapService
 import net.corda.node.services.transactions.PersistentUniquenessProvider
 import net.corda.node.utilities.AffinityExecutor.ServiceAffinityExecutor
 import net.corda.node.utilities.configureDatabase
-import net.corda.node.utilities.databaseTransaction
+import net.corda.node.utilities.transaction
 import net.corda.testing.MOCK_NODE_VERSION_INFO
 import net.corda.testing.TestNodeConfiguration
 import net.corda.testing.freeLocalHostAndPort
@@ -72,7 +70,7 @@ class ArtemisMessagingTests {
     @Before
     fun setUp() {
         val baseDirectory = temporaryFolder.root.toPath()
-        userService = RPCUserServiceImpl(FullNodeConfiguration(baseDirectory, empty()))
+        userService = RPCUserServiceImpl(emptyList())
         config = TestNodeConfiguration(
                 baseDirectory = baseDirectory,
                 myLegalName = "me",
@@ -88,6 +86,8 @@ class ArtemisMessagingTests {
     fun cleanUp() {
         messagingClient?.stop()
         messagingServer?.stop()
+        messagingClient = null
+        messagingServer = null
         dataSource.close()
         LogHelper.reset(PersistentUniquenessProvider::class)
     }
@@ -220,12 +220,12 @@ class ArtemisMessagingTests {
     }
 
     private fun createMessagingClient(server: HostAndPort = hostAndPort): NodeMessagingClient {
-        return databaseTransaction(database) {
+        return database.transaction {
             NodeMessagingClient(
                     config,
                     MOCK_NODE_VERSION_INFO,
                     server,
-                    identity.public.composite,
+                    identity.public,
                     ServiceAffinityExecutor("ArtemisMessagingTests", 1),
                     database,
                     networkMapRegistrationFuture,

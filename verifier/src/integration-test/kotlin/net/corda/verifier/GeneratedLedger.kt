@@ -7,6 +7,7 @@ import net.corda.core.transactions.LedgerTransaction
 import net.corda.core.transactions.WireTransaction
 import java.io.ByteArrayInputStream
 import java.math.BigInteger
+import java.security.PublicKey
 import java.util.*
 
 /**
@@ -23,7 +24,7 @@ data class GeneratedLedger(
 ) {
     val hashTransactionMap: Map<SecureHash, WireTransaction> by lazy { transactions.associateBy(WireTransaction::id) }
     val attachmentMap: Map<SecureHash, Attachment> by lazy { attachments.associateBy(Attachment::id) }
-    val identityMap: Map<CompositeKey, Party> by lazy { identities.associateBy(Party::owningKey) }
+    val identityMap: Map<PublicKey, Party> by lazy { identities.associateBy(Party::owningKey) }
 
     companion object {
         val empty = GeneratedLedger(emptyList(), emptyMap(), emptySet(), emptySet())
@@ -68,7 +69,7 @@ data class GeneratedLedger(
                     commands.map { it.first },
                     null,
                     signers,
-                    TransactionType.General(),
+                    TransactionType.General,
                     null
             )
             val newOutputStateAndRefs = outputs.mapIndexed { i, state ->
@@ -103,7 +104,7 @@ data class GeneratedLedger(
                     commands.map { it.first },
                     inputNotary,
                     signers,
-                    TransactionType.General(),
+                    TransactionType.General,
                     null
             )
             val newOutputStateAndRefs = outputs.mapIndexed { i, state ->
@@ -144,7 +145,7 @@ data class GeneratedLedger(
                         emptyList(),
                         inputNotary,
                         signers,
-                        TransactionType.NotaryChange(),
+                        TransactionType.NotaryChange,
                         null
                 )
                 val newOutputStateAndRefs = outputs.mapIndexed { i, state ->
@@ -183,7 +184,7 @@ data class GeneratedLedger(
 
 data class GeneratedState(
         val nonce: Long,
-        override val participants: List<CompositeKey>
+        override val participants: List<PublicKey>
 ) : ContractState {
     override val contract = DummyContract()
 }
@@ -200,7 +201,7 @@ class GeneratedCommandData(
 ) : CommandData
 
 val keyPairGenerator = Generator.long().map { entropyToKeyPair(BigInteger.valueOf(it)) }
-val publicKeyGenerator = keyPairGenerator.map { it.public.composite }
+val publicKeyGenerator = keyPairGenerator.map { it.public }
 val stateGenerator: Generator<ContractState> =
         Generator.replicatePoisson(2.0, publicKeyGenerator).combine(Generator.long()) { participants, nonce ->
             GeneratedState(nonce, participants)
@@ -214,6 +215,7 @@ fun commandGenerator(partiesToPickFrom: Collection<Party>): Generator<Pair<Comma
         )
     }
 }
+
 val partyGenerator: Generator<Party> = Generator.int().combine(publicKeyGenerator) { n, key -> Party("Party$n", key) }
 
 fun <A> pickOneOrMaybeNew(from: Collection<A>, generator: Generator<A>): Generator<A> {

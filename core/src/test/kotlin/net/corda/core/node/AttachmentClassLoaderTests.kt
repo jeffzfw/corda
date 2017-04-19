@@ -2,7 +2,6 @@ package net.corda.core.node
 
 import com.esotericsoftware.kryo.Kryo
 import net.corda.core.contracts.*
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
 import net.corda.core.node.services.AttachmentStorage
@@ -12,13 +11,14 @@ import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.testing.MEGA_CORP
 import net.corda.testing.node.MockAttachmentStorage
 import org.apache.commons.io.IOUtils
-import org.junit.After
 import org.junit.Assert
 import org.junit.Before
 import org.junit.Test
 import java.io.ByteArrayInputStream
 import java.io.ByteArrayOutputStream
+import java.net.URL
 import java.net.URLClassLoader
+import java.security.PublicKey
 import java.util.jar.JarOutputStream
 import java.util.zip.ZipEntry
 import kotlin.test.assertEquals
@@ -34,13 +34,13 @@ val ATTACHMENT_TEST_PROGRAM_ID = AttachmentClassLoaderTests.AttachmentDummyContr
 
 class AttachmentClassLoaderTests {
     companion object {
-        val ISOLATED_CONTRACTS_JAR_PATH = AttachmentClassLoaderTests::class.java.getResource("isolated.jar")
+        val ISOLATED_CONTRACTS_JAR_PATH: URL = AttachmentClassLoaderTests::class.java.getResource("isolated.jar")
     }
 
     class AttachmentDummyContract : Contract {
         data class State(val magicNumber: Int = 0) : ContractState {
             override val contract = ATTACHMENT_TEST_PROGRAM_ID
-            override val participants: List<CompositeKey>
+            override val participants: List<PublicKey>
                 get() = listOf()
         }
 

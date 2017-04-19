@@ -6,9 +6,13 @@ import co.paralleluniverse.io.serialization.kryo.KryoSerializer
 import co.paralleluniverse.strands.Strand
 import com.codahale.metrics.Gauge
 import com.esotericsoftware.kryo.Kryo
+import com.esotericsoftware.kryo.Serializer
+import com.esotericsoftware.kryo.io.Input
+import com.esotericsoftware.kryo.io.Output
 import com.esotericsoftware.kryo.pool.KryoPool
 import com.google.common.collect.HashMultimap
 import com.google.common.util.concurrent.ListenableFuture
+import io.requery.util.CloseableIterator
 import net.corda.core.ThreadBox
 import net.corda.core.bufferUntilSubscribed
 import net.corda.core.crypto.Party
@@ -74,17 +78,34 @@ class StateMachineManager(val serviceHub: ServiceHubInternal,
     private val quasarKryoPool = KryoPool.Builder {
         val serializer = Fiber.getFiberSerializer(false) as KryoSerializer
         DefaultKryoCustomizer.customize(serializer.kryo)
+        serializer.kryo.addDefaultSerializer(AutoCloseable::class.java, AutoCloseableSerialisationDetector)
+        serializer.kryo
     }.build()
+
+    private object AutoCloseableSerialisationDetector : Serializer<AutoCloseable>() {
+        override fun write(kryo: Kryo, output: Output, closeable: AutoCloseable) {
+            val message = if (closeable is CloseableIterator<*>) {
+                "A live Iterator pointing to the database has been detected during flow checkpointing. This may be due " +
+                        "to a Vault query - move it into a private method."
+            } else {
+                "${closeable.javaClass.name}, which is a closeable resource, has been detected during flow checkpointing. " +
+                        "Restoring such resources across node restarts is not supported. Make sure code accessing it is " +
+                        "confined to a private method or the reference is nulled out."
+            }
+            throw UnsupportedOperationException(message)
+        }
+        override fun read(kryo: Kryo, input: Input, type: Class<AutoCloseable>) = throw IllegalStateException("Should not reach here!")
+    }
 
     companion object {
         private val logger = loggerFor<StateMachineManager>()
         internal val sessionTopic = TopicSession("platform.session")
+
         init {
             Fiber.setDefaultUncaughtExceptionHandler { fiber, throwable ->
                 (fiber as FlowStateMachineImpl<*>).logger.error("Caught exception from flow", throwable)
             }
         }
-
     }
 
     val scheduler = FiberScheduler()
@@ -101,12 +122,13 @@ class StateMachineManager(val serviceHub: ServiceHubInternal,
         var started = false
         val stateMachines = LinkedHashMap<FlowStateMachineImpl<*>, Checkpoint>()
         val changesPublisher = PublishSubject.create<Change>()!!
-        val fibersWaitingForLedgerCommit = HashMultimap.create<SecureHash,  FlowStateMachineImpl<*>>()!!
+        val fibersWaitingForLedgerCommit = HashMultimap.create<SecureHash, FlowStateMachineImpl<*>>()!!
 
         fun notifyChangeObservers(fiber: FlowStateMachineImpl<*>, addOrRemove: AddOrRemove) {
             changesPublisher.bufferUntilDatabaseCommit().onNext(Change(fiber.logic, addOrRemove, fiber.id))
         }
     }
+
     private val mutex = ThreadBox(InnerState())
 
     // True if we're shutting down, so don't resume anything.
@@ -242,7 +264,7 @@ class StateMachineManager(val serviceHub: ServiceHubInternal,
         val waitingForResponse = fiber.waitingForResponse
         if (waitingForResponse != null) {
             if (waitingForResponse is WaitForLedgerCommit) {
-                val stx = databaseTransaction(database) {
+                val stx = database.transaction {
                     serviceHub.storageService.validatedTransactions.getTransaction(waitingForResponse.hash)
                 }
                 if (stx != null) {
@@ -456,7 +478,7 @@ class StateMachineManager(val serviceHub: ServiceHubInternal,
         // on the flow completion future inside that context. The problem is that any progress checkpoints are
         // unable to acquire the table lock and move forward till the calling transaction finishes.
         // Committing in line here on a fresh context ensure we can progress.
-        val fiber = isolatedTransaction(database) {
+        val fiber = database.isolatedTransaction {
             val fiber = createFiber(logic)
             updateCheckpoint(fiber)
             fiber
@@ -507,7 +529,7 @@ class StateMachineManager(val serviceHub: ServiceHubInternal,
             }
         } else if (ioRequest is WaitForLedgerCommit) {
             // Is it already committed?
-            val stx = databaseTransaction(database) {
+            val stx = database.transaction {
                 serviceHub.storageService.validatedTransactions.getTransaction(ioRequest.hash)
             }
             if (stx != null) {

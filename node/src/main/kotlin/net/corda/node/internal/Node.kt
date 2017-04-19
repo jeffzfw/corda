@@ -23,9 +23,9 @@ import net.corda.node.services.config.FullNodeConfiguration
 import net.corda.node.services.messaging.ArtemisMessagingServer
 import net.corda.node.services.messaging.NodeMessagingClient
 import net.corda.node.services.transactions.PersistentUniquenessProvider
+import net.corda.node.services.transactions.RaftNonValidatingNotaryService
 import net.corda.node.services.transactions.RaftUniquenessProvider
 import net.corda.node.services.transactions.RaftValidatingNotaryService
-import net.corda.node.services.transactions.RaftNonValidatingNotaryService
 import net.corda.node.utilities.AddressUtils
 import net.corda.node.utilities.AffinityExecutor
 import net.corda.nodeapi.ArtemisMessagingComponent.NetworkMapAddress
@@ -128,7 +128,7 @@ class Node(override val configuration: FullNodeConfiguration,
     }
 
     override fun makeMessagingService(): MessagingServiceInternal {
-        userService = RPCUserServiceImpl(configuration)
+        userService = RPCUserServiceImpl(configuration.rpcUsers)
         val serverAddress = configuration.messagingServerAddress ?: makeLocalMessageBroker()
         val myIdentityOrNullIfNetworkMapService = if (networkMapAddress != null) obtainLegalIdentity().owningKey else null
         return NodeMessagingClient(
@@ -196,7 +196,10 @@ class Node(override val configuration: FullNodeConfiguration,
     override fun makeUniquenessProvider(type: ServiceType): UniquenessProvider {
         return when (type) {
             RaftValidatingNotaryService.type, RaftNonValidatingNotaryService.type -> with(configuration) {
-                RaftUniquenessProvider(baseDirectory, notaryNodeAddress!!, notaryClusterAddresses, database, configuration)
+                val provider = RaftUniquenessProvider(baseDirectory, notaryNodeAddress!!, notaryClusterAddresses, database, configuration)
+                provider.start()
+                runOnStop += Runnable { provider.stop() }
+                provider
             }
             else -> PersistentUniquenessProvider()
         }
@@ -224,6 +227,7 @@ class Node(override val configuration: FullNodeConfiguration,
                         "-tcpAllowOthers",
                         "-tcpDaemon",
                         "-key", "node", databaseName)
+                runOnStop += Runnable { server.stop() }
                 val url = server.start().url
                 printBasicNodeInfo("Database connection url is", "jdbc:h2:$url/node")
             }

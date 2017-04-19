@@ -10,13 +10,15 @@ import net.corda.core.node.PhysicalLocation
 import net.corda.core.node.services.ServiceInfo
 import net.corda.core.node.services.containsType
 import net.corda.core.then
+import net.corda.core.utilities.DUMMY_MAP
+import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.core.utilities.ProgressTracker
 import net.corda.irs.api.NodeInterestRates
 import net.corda.node.services.config.NodeConfiguration
 import net.corda.node.services.network.NetworkMapService
 import net.corda.node.services.transactions.SimpleNotaryService
 import net.corda.node.utilities.AddOrRemove
-import net.corda.node.utilities.databaseTransaction
+import net.corda.node.utilities.transaction
 import net.corda.testing.TestNodeConfiguration
 import net.corda.testing.node.InMemoryMessagingNetwork
 import net.corda.testing.node.MockNetwork
@@ -91,7 +93,7 @@ abstract class Simulation(val networkSendManuallyPumped: Boolean,
             require(advertisedServices.containsType(NetworkMapService.type))
             val cfg = TestNodeConfiguration(
                     baseDirectory = config.baseDirectory,
-                    myLegalName = "Network coordination center",
+                    myLegalName = DUMMY_MAP.name,
                     nearestCity = "Amsterdam",
                     networkMapService = null)
             return object : SimulatedNode(cfg, network, networkMapAddr, advertisedServices, id, overrideServices, entropyRoot) {}
@@ -105,7 +107,7 @@ abstract class Simulation(val networkSendManuallyPumped: Boolean,
             require(advertisedServices.containsType(SimpleNotaryService.type))
             val cfg = TestNodeConfiguration(
                     baseDirectory = config.baseDirectory,
-                    myLegalName = "Notary Service",
+                    myLegalName = DUMMY_NOTARY.name,
                     nearestCity = "Zurich",
                     networkMapService = null)
             return SimulatedNode(cfg, network, networkMapAddr, advertisedServices, id, overrideServices, entropyRoot)
@@ -126,7 +128,7 @@ abstract class Simulation(val networkSendManuallyPumped: Boolean,
                 override fun start(): MockNetwork.MockNode {
                     super.start()
                     javaClass.classLoader.getResourceAsStream("example.rates.txt").use {
-                        databaseTransaction(database) {
+                        database.transaction {
                             findService<NodeInterestRates.Service>().upload(it)
                         }
                     }

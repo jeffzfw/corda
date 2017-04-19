@@ -1,8 +1,8 @@
 @file:JvmName("Corda")
+
 package net.corda.node
 
 import com.jcabi.manifests.Manifests
-import com.typesafe.config.Config
 import com.typesafe.config.ConfigException
 import joptsimple.OptionException
 import net.corda.core.*
@@ -60,7 +60,7 @@ fun main(args: Array<String>) {
     fun manifestValue(name: String): String? = if (Manifests.exists(name)) Manifests.read(name) else null
 
     val nodeVersionInfo = NodeVersionInfo(
-            manifestValue("Corda-Version")?.let { Version.parse(it) } ?: Version(0, 0, false),
+            manifestValue("Corda-Version")?.let { Version.parse(it) } ?: Version(0, 0, 0, false),
             manifestValue("Corda-Revision") ?: "Unknown",
             manifestValue("Corda-Vendor") ?: "Unknown"
     )
@@ -86,9 +86,7 @@ fun main(args: Array<String>) {
     printBasicNodeInfo("Logs can be found in", System.getProperty("log-path"))
 
     val conf = try {
-        val conf = cmdlineOptions.loadConfig()
-        checkConfigVersion(conf)
-        FullNodeConfiguration(cmdlineOptions.baseDirectory, conf)
+        cmdlineOptions.loadConfig()
     } catch (e: ConfigException) {
         println("Unable to load the configuration file: ${e.rootCause.message}")
         exitProcess(2)
@@ -118,6 +116,10 @@ fun main(args: Array<String>) {
     log.info("VM ${info.vmName} ${info.vmVendor} ${info.vmVersion}")
     log.info("Machine: ${InetAddress.getLocalHost().hostName}")
     log.info("Working Directory: ${cmdlineOptions.baseDirectory}")
+    val agentProperties = sun.misc.VMSupport.getAgentProperties()
+    if (agentProperties.containsKey("sun.jdwp.listenerAddress")) {
+        log.info("Debug port: ${agentProperties.getProperty("sun.jdwp.listenerAddress")}")
+    }
     log.info("Starting as node on ${conf.p2pAddress}")
 
     try {
@@ -153,16 +155,6 @@ fun main(args: Array<String>) {
     exitProcess(0)
 }
 
-private fun checkConfigVersion(conf: Config) {
-    // TODO: Remove this check in future milestone.
-    if (conf.hasPath("artemisAddress")) {
-        // artemisAddress has been renamed to p2pAddress in M10.
-        println("artemisAddress has been renamed to p2pAddress in M10, please upgrade your configuration file and start Corda node again.")
-        println("Corda will now exit...")
-        exitProcess(1)
-    }
-}
-
 private fun checkJavaVersion() {
     // Check we're not running a version of Java with a known bug: https://github.com/corda/corda/issues/83
     try {
@@ -181,7 +173,7 @@ private fun printPluginsAndServices(node: Node) {
     }
     val plugins = node.pluginRegistries
             .map { it.javaClass.name }
-            .filterNot { it.startsWith("net.corda.node.") || it.startsWith("net.corda.core.") || it.startsWith("net.corda.nodeapi.")}
+            .filterNot { it.startsWith("net.corda.node.") || it.startsWith("net.corda.core.") || it.startsWith("net.corda.nodeapi.") }
             .map { it.substringBefore('$') }
     if (plugins.isNotEmpty())
         printBasicNodeInfo("Loaded plugins", plugins.joinToString())
@@ -225,8 +217,7 @@ private fun drawBanner(nodeVersionInfo: NodeVersionInfo) {
     Emoji.renderIfSupported {
         val (msg1, msg2) = messageOfTheDay()
 
-        println(Ansi.ansi().fgBrightRed().a(
-"""
+        println(Ansi.ansi().fgBrightRed().a("""
    ______               __
   / ____/     _________/ /___ _
  / /     __  / ___/ __  / __ `/         """).fgBrightBlue().a(msg1).newline().fgBrightRed().a(

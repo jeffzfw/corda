@@ -7,16 +7,16 @@ import com.google.common.base.Function
 import com.google.common.base.Throwables
 import com.google.common.io.ByteStreams
 import com.google.common.util.concurrent.*
+import net.corda.core.crypto.SecureHash
 import net.corda.core.crypto.newSecureRandom
+import net.corda.core.crypto.sha256
 import net.corda.core.serialization.CordaSerializable
 import org.slf4j.Logger
 import rx.Observable
 import rx.Observer
 import rx.subjects.PublishSubject
 import rx.subjects.UnicastSubject
-import java.io.BufferedInputStream
-import java.io.InputStream
-import java.io.OutputStream
+import java.io.*
 import java.math.BigDecimal
 import java.nio.charset.Charset
 import java.nio.charset.StandardCharsets.UTF_8
@@ -28,7 +28,10 @@ import java.util.concurrent.*
 import java.util.concurrent.locks.ReentrantLock
 import java.util.function.BiConsumer
 import java.util.stream.Stream
+import java.util.zip.Deflater
+import java.util.zip.ZipEntry
 import java.util.zip.ZipInputStream
+import java.util.zip.ZipOutputStream
 import kotlin.concurrent.withLock
 import kotlin.reflect.KProperty
 
@@ -102,7 +105,7 @@ infix fun <T> ListenableFuture<T>.then(body: () -> Unit): ListenableFuture<T> = 
 infix fun <T> ListenableFuture<T>.success(body: (T) -> Unit): ListenableFuture<T> = apply { success(RunOnCallerThread, body) }
 infix fun <T> ListenableFuture<T>.failure(body: (Throwable) -> Unit): ListenableFuture<T> = apply { failure(RunOnCallerThread, body) }
 @Suppress("UNCHECKED_CAST") // We need the awkward cast because otherwise F cannot be nullable, even though it's safe.
-infix fun <F, T> ListenableFuture<F>.map(mapper: (F) -> T): ListenableFuture<T> = Futures.transform(this, Function { (mapper as (F?) -> T)(it) })
+infix fun <F, T> ListenableFuture<F>.map(mapper: (F) -> T): ListenableFuture<T> = Futures.transform(this, { (mapper as (F?) -> T)(it) })
 
 infix fun <F, T> ListenableFuture<F>.flatMap(mapper: (F) -> ListenableFuture<T>): ListenableFuture<T> = Futures.transformAsync(this) { mapper(it!!) }
 /** Executes the given block and sets the future to either the result, or any exception that was thrown. */
@@ -153,7 +156,7 @@ fun Path.writeLines(lines: Iterable<CharSequence>, charset: Charset = UTF_8, var
 fun InputStream.copyTo(target: Path, vararg options: CopyOption): Long = Files.copy(this, target, *options)
 
 // Simple infix function to add back null safety that the JDK lacks:  timeA until timeB
-infix fun Temporal.until(endExclusive: Temporal) = Duration.between(this, endExclusive)
+infix fun Temporal.until(endExclusive: Temporal): Duration = Duration.between(this, endExclusive)
 
 /** Returns the index of the given item or throws [IllegalArgumentException] if not found. */
 fun <T> List<T>.indexOfOrThrow(item: T): Int {
@@ -309,11 +312,44 @@ fun extractZipFile(inputStream: InputStream, toDirectory: Path) {
     }
 }
 
+/**
+ * Get a valid InputStream from an in-memory zip as required for tests.
+ * Note that a slightly bigger than numOfExpectedBytes size is expected.
+ */
+@Throws(IllegalArgumentException::class)
+fun sizedInputStreamAndHash(numOfExpectedBytes: Int): InputStreamAndHash {
+    if (numOfExpectedBytes <= 0) throw IllegalArgumentException("A positive number of numOfExpectedBytes is required.")
+    val baos = ByteArrayOutputStream()
+    ZipOutputStream(baos).use({ zos ->
+        val arraySize = 1024
+        val bytes = ByteArray(arraySize)
+        val n = (numOfExpectedBytes - 1) / arraySize + 1 // same as Math.ceil(numOfExpectedBytes/arraySize).
+        zos.setLevel(Deflater.NO_COMPRESSION)
+        zos.putNextEntry(ZipEntry("z"))
+        for (i in 0 until n) {
+            zos.write(bytes, 0, arraySize)
+        }
+        zos.closeEntry()
+    })
+    return getInputStreamAndHashFromOutputStream(baos)
+}
+
+/** Convert a [ByteArrayOutputStream] to [InputStreamAndHash]. */
+fun getInputStreamAndHashFromOutputStream(baos: ByteArrayOutputStream): InputStreamAndHash {
+    // TODO: Consider converting OutputStream to InputStream without creating a ByteArray, probably using piped streams.
+    val bytes = baos.toByteArray()
+    // TODO: Consider calculating sha256 on the fly using a DigestInputStream.
+    return InputStreamAndHash(ByteArrayInputStream(bytes), bytes.sha256())
+}
+
+data class InputStreamAndHash(val inputStream: InputStream, val sha256: SecureHash.SHA256)
+
 // TODO: Generic csv printing utility for clases.
 
 val Throwable.rootCause: Throwable get() = Throwables.getRootCause(this)
 
 /** Representation of an operation that may have thrown an error. */
+@Suppress("DataClassPrivateConstructor")
 @CordaSerializable
 data class ErrorOr<out A> private constructor(val value: A?, val error: Throwable?) {
     // The ErrorOr holds a value iff error == null

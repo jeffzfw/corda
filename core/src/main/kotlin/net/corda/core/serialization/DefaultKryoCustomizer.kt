@@ -16,9 +16,12 @@ import net.corda.core.utilities.NonEmptySet
 import net.corda.core.utilities.NonEmptySetSerializer
 import net.i2p.crypto.eddsa.EdDSAPrivateKey
 import net.i2p.crypto.eddsa.EdDSAPublicKey
+import org.bouncycastle.asn1.x500.X500Name
 import org.objenesis.strategy.StdInstantiatorStrategy
 import org.slf4j.Logger
 import java.io.BufferedInputStream
+import java.io.FileInputStream
+import java.io.InputStream
 import java.util.*
 
 object DefaultKryoCustomizer {
@@ -53,6 +56,7 @@ object DefaultKryoCustomizer {
             ImmutableMapSerializer.registerSerializers(this)
             ImmutableMultimapSerializer.registerSerializers(this)
 
+            // InputStream subclasses whitelisting, required for attachments.
             register(BufferedInputStream::class.java, InputStreamSerializer)
             register(Class.forName("sun.net.www.protocol.jar.JarURLConnection\$JarURLInputStream"), InputStreamSerializer)
 
@@ -62,8 +66,7 @@ object DefaultKryoCustomizer {
             register(EdDSAPrivateKey::class.java, Ed25519PrivateKeySerializer)
 
             // Using a custom serializer for compactness
-            register(CompositeKey.Node::class.java, CompositeKeyNodeSerializer)
-            register(CompositeKey.Leaf::class.java, CompositeKeyLeafSerializer)
+            register(CompositeKey::class.java, CompositeKeySerializer)
 
             // Exceptions. We don't bother sending the stack traces as the client will fill in its own anyway.
             register(Array<StackTraceElement>::class, read = { _, _ -> emptyArray() }, write = { _, _, _ -> })
@@ -80,6 +83,13 @@ object DefaultKryoCustomizer {
             register(BitSet::class.java, ReferencesAwareJavaSerializer)
 
             addDefaultSerializer(Logger::class.java, LoggerSerializer)
+
+            register(FileInputStream::class.java, InputStreamSerializer)
+            // Required for HashCheckingStream (de)serialization.
+            // Note that return type should be specifically set to InputStream, otherwise it may not work, i.e. val aStream : InputStream = HashCheckingStream(...).
+            addDefaultSerializer(InputStream::class.java, InputStreamSerializer)
+
+            register(X500Name::class.java, X500NameSerializer)
 
             val customization = KryoSerializationCustomization(this)
             pluginRegistries.forEach { it.customizeSerialization(customization) }

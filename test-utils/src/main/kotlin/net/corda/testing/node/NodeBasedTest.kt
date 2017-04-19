@@ -8,14 +8,17 @@ import net.corda.core.flatMap
 import net.corda.core.map
 import net.corda.core.node.services.ServiceInfo
 import net.corda.core.node.services.ServiceType
+import net.corda.core.utilities.DUMMY_MAP
 import net.corda.node.internal.Node
 import net.corda.node.services.config.ConfigHelper
 import net.corda.node.services.config.FullNodeConfiguration
 import net.corda.node.services.transactions.RaftValidatingNotaryService
 import net.corda.node.utilities.ServiceIdentityGenerator
 import net.corda.nodeapi.User
+import net.corda.nodeapi.config.parseAs
 import net.corda.testing.MOCK_NODE_VERSION_INFO
 import net.corda.testing.getFreeLocalPorts
+import org.apache.logging.log4j.Level
 import org.junit.After
 import org.junit.Rule
 import org.junit.rules.TemporaryFolder
@@ -37,6 +40,10 @@ abstract class NodeBasedTest {
 
     val networkMapNode: Node get() = _networkMapNode ?: startNetworkMapNode()
 
+    init {
+        System.setProperty("consoleLogLevel", Level.DEBUG.name().toLowerCase())
+    }
+
     /**
      * Stops the network map node and all the nodes started by [startNode]. This is called automatically after each test
      * but can also be called manually within a test.
@@ -52,7 +59,7 @@ abstract class NodeBasedTest {
      * You can use this method to start the network map node in a more customised manner. Otherwise it
      * will automatically be started with the default parameters.
      */
-    fun startNetworkMapNode(legalName: String = "Network Map",
+    fun startNetworkMapNode(legalName: String = DUMMY_MAP.name,
                             advertisedServices: Set<ServiceInfo> = emptySet(),
                             rpcUsers: List<User> = emptyList(),
                             configOverrides: Map<String, Any> = emptyMap()): Node {
@@ -126,7 +133,7 @@ abstract class NodeBasedTest {
                         "extraAdvertisedServiceIds" to advertisedServices.map { it.toString() },
                         "rpcUsers" to rpcUsers.map {
                             mapOf(
-                                    "user" to it.username,
+                                    "username" to it.username,
                                     "password" to it.password,
                                     "permissions" to it.permissions
                             )
@@ -134,7 +141,7 @@ abstract class NodeBasedTest {
                 ) + configOverrides
         )
 
-        val node = FullNodeConfiguration(baseDirectory, config).createNode(MOCK_NODE_VERSION_INFO)
+        val node = config.parseAs<FullNodeConfiguration>().createNode(MOCK_NODE_VERSION_INFO)
         node.start()
         nodes += node
         thread(name = legalName) {

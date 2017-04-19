@@ -1,10 +1,11 @@
 package net.corda.demobench.explorer
 
 import net.corda.core.utilities.loggerFor
-import java.io.IOException
-import java.util.concurrent.Executors
 import net.corda.demobench.model.NodeConfig
 import net.corda.demobench.model.forceDirectory
+import net.corda.demobench.readErrorLines
+import java.io.IOException
+import java.util.concurrent.Executors
 
 class Explorer internal constructor(private val explorerController: ExplorerController) : AutoCloseable {
     private companion object {
@@ -40,13 +41,18 @@ class Explorer internal constructor(private val explorerController: ExplorerCont
             // Close these streams because no-one is using them.
             safeClose(p.outputStream)
             safeClose(p.inputStream)
-            safeClose(p.errorStream)
 
             executor.submit {
                 val exitValue = p.waitFor()
+                val errors = p.readErrorLines()
                 process = null
 
-                log.info("Node Explorer for '{}' has exited (value={})", config.legalName, exitValue)
+                if (errors.isEmpty()) {
+                    log.info("Node Explorer for '{}' has exited (value={})", config.legalName, exitValue)
+                } else {
+                    log.error("Node Explorer for '{}' has exited (value={}, {})", config.legalName, exitValue, errors)
+                }
+
                 onExit(config)
             }
         } catch (e: IOException) {

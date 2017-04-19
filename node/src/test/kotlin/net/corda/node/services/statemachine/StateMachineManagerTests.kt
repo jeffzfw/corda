@@ -3,6 +3,7 @@ package net.corda.node.services.statemachine
 import co.paralleluniverse.fibers.Fiber
 import co.paralleluniverse.fibers.Suspendable
 import com.google.common.util.concurrent.ListenableFuture
+import net.corda.contracts.asset.Cash
 import net.corda.core.*
 import net.corda.core.contracts.DOLLARS
 import net.corda.core.contracts.DummyState
@@ -13,6 +14,7 @@ import net.corda.core.flows.FlowLogic
 import net.corda.core.messaging.MessageRecipients
 import net.corda.core.node.services.PartyInfo
 import net.corda.core.node.services.ServiceInfo
+import net.corda.core.node.services.unconsumedStates
 import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.serialization.deserialize
 import net.corda.core.transactions.SignedTransaction
@@ -27,7 +29,7 @@ import net.corda.flows.FinalityFlow
 import net.corda.flows.NotaryFlow
 import net.corda.node.services.persistence.checkpoints
 import net.corda.node.services.transactions.ValidatingNotaryService
-import net.corda.node.utilities.databaseTransaction
+import net.corda.node.utilities.transaction
 import net.corda.testing.expect
 import net.corda.testing.expectEvents
 import net.corda.testing.initiateSingleShotFlow
@@ -201,7 +203,7 @@ class StateMachineManagerTests {
 
         // Kick off first send and receive
         node2.services.startFlow(PingPongFlow(node3.info.legalIdentity, payload))
-        databaseTransaction(node2.database) {
+        node2.database.transaction {
             assertEquals(1, node2.checkpointStorage.checkpoints().size)
         }
         // Make sure the add() has finished initial processing.
@@ -209,7 +211,7 @@ class StateMachineManagerTests {
         node2.disableDBCloseOnStop()
         // Restart node and thus reload the checkpoint and resend the message with same UUID
         node2.stop()
-        databaseTransaction(node2.database) {
+        node2.database.transaction {
             assertEquals(1, node2.checkpointStorage.checkpoints().size) // confirm checkpoint
         }
         val node2b = net.createNode(node1.info.address, node2.id, advertisedServices = *node2.advertisedServices.toTypedArray())
@@ -225,10 +227,10 @@ class StateMachineManagerTests {
         assertEquals(4, receivedCount, "Flow should have exchanged 4 unique messages")// Two messages each way
         // can't give a precise value as every addMessageHandler re-runs the undelivered messages
         assertTrue(sentCount > receivedCount, "Node restart should have retransmitted messages")
-        databaseTransaction(node2b.database) {
+        node2b.database.transaction {
             assertEquals(0, node2b.checkpointStorage.checkpoints().size, "Checkpoints left after restored flow should have ended")
         }
-        databaseTransaction(node3.database) {
+        node3.database.transaction {
             assertEquals(0, node3.checkpointStorage.checkpoints().size, "Checkpoints left after restored flow should have ended")
         }
         assertEquals(payload2, firstAgain.receivedPayload, "Received payload does not match the first value on Node 3")
@@ -324,7 +326,7 @@ class StateMachineManagerTests {
                 node1.info.legalIdentity,
                 notary1.info.notaryIdentity))
         // We pay a couple of times, the notary picking should go round robin
-        for (i in 1 .. 3) {
+        for (i in 1..3) {
             node1.services.startFlow(CashPaymentFlow(500.DOLLARS, node2.info.legalIdentity))
             net.runNetwork()
         }
@@ -429,7 +431,7 @@ class StateMachineManagerTests {
                 .isThrownBy { receivingFiber.resultFuture.getOrThrow() }
                 .withMessage("Nothing useful")
                 .withStackTraceContaining(ReceiveFlow::class.java.name)  // Make sure the stack trace is that of the receiving flow
-        databaseTransaction(node2.database) {
+        node2.database.transaction {
             assertThat(node2.checkpointStorage.checkpoints()).isEmpty()
         }
 
@@ -568,6 +570,13 @@ class StateMachineManagerTests {
         assertThatExceptionOfType(FlowSessionException::class.java).isThrownBy {
             waiter.getOrThrow()
         }
+    }
+
+    @Test
+    fun `lazy db iterator left on stack during checkpointing`() {
+        val result = node2.services.startFlow(VaultAccessFlow(node1.info.legalIdentity)).resultFuture
+        net.runNetwork()
+        assertThatThrownBy { result.getOrThrow() }.hasMessageContaining("Vault").hasMessageContaining("private method")
     }
 
 
@@ -736,6 +745,14 @@ class StateMachineManagerTests {
                 if (throwException != null) throw throwException.invoke()
                 return subFlow(FinalityFlow(stx, setOf(otherParty))).single()
             }
+        }
+    }
+
+    private class VaultAccessFlow(val otherParty: Party) : FlowLogic<Unit>() {
+        @Suspendable
+        override fun call() {
+            serviceHub.vaultService.unconsumedStates<Cash.State>().filter { true }
+            send(otherParty, "Hello")
         }
     }
 

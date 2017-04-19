@@ -3,7 +3,6 @@ package net.corda.core.node.services
 import com.google.common.annotations.VisibleForTesting
 import com.google.common.util.concurrent.ListenableFuture
 import net.corda.core.contracts.Contract
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.crypto.Party
 import net.corda.core.messaging.MessagingService
 import net.corda.core.messaging.SingleMessageRecipient
@@ -11,6 +10,7 @@ import net.corda.core.node.NodeInfo
 import net.corda.core.randomOrNull
 import net.corda.core.serialization.CordaSerializable
 import rx.Observable
+import java.security.PublicKey
 
 /**
  * A network map contains lists of nodes on the network along with information about their identity keys, services
@@ -21,10 +21,12 @@ import rx.Observable
 interface NetworkMapCache {
 
     @CordaSerializable
-    sealed class MapChange(val node: NodeInfo) {
-        class Added(node: NodeInfo) : MapChange(node)
-        class Removed(node: NodeInfo) : MapChange(node)
-        class Modified(node: NodeInfo, val previousNode: NodeInfo) : MapChange(node)
+    sealed class MapChange {
+        abstract val node: NodeInfo
+
+        data class Added(override val node: NodeInfo) : MapChange()
+        data class Removed(override val node: NodeInfo) : MapChange()
+        data class Modified(override val node: NodeInfo, val previousNode: NodeInfo) : MapChange()
     }
 
     /** A list of all nodes the cache is aware of */
@@ -72,11 +74,11 @@ interface NetworkMapCache {
      */
 
     /** Look up the node info for a specific peer key. */
-    fun getNodeByLegalIdentityKey(compositeKey: CompositeKey): NodeInfo?
+    fun getNodeByLegalIdentityKey(identityKey: PublicKey): NodeInfo?
 
-    /** Look up all nodes advertising the service owned by [compositeKey] */
-    fun getNodesByAdvertisedServiceIdentityKey(compositeKey: CompositeKey): List<NodeInfo> {
-        return partyNodes.filter { it.advertisedServices.any { it.identity.owningKey == compositeKey } }
+    /** Look up all nodes advertising the service owned by [publicKey] */
+    fun getNodesByAdvertisedServiceIdentityKey(publicKey: PublicKey): List<NodeInfo> {
+        return partyNodes.filter { it.advertisedServices.any { it.identity.owningKey == publicKey } }
     }
 
     /** Returns information about the party, which may be a specific node or a service */

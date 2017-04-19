@@ -4,13 +4,15 @@ import co.paralleluniverse.fibers.Suspendable
 import com.google.common.net.HostAndPort
 import net.corda.client.rpc.CordaRPCClientImpl
 import net.corda.core.crypto.Party
-import net.corda.core.crypto.composite
 import net.corda.core.crypto.generateKeyPair
+import net.corda.core.crypto.toBase58String
 import net.corda.core.flows.FlowLogic
 import net.corda.core.getOrThrow
 import net.corda.core.messaging.CordaRPCOps
 import net.corda.core.random63BitValue
 import net.corda.core.seconds
+import net.corda.core.utilities.ALICE
+import net.corda.core.utilities.BOB
 import net.corda.core.utilities.unwrap
 import net.corda.node.internal.Node
 import net.corda.nodeapi.ArtemisMessagingComponent.Companion.CLIENTS_PREFIX
@@ -49,7 +51,7 @@ abstract class MQSecurityTest : NodeBasedTest() {
 
     @Before
     fun start() {
-        alice = startNode("Alice", rpcUsers = extraRPCUsers + rpcUser).getOrThrow()
+        alice = startNode(ALICE.name, rpcUsers = extraRPCUsers + rpcUser).getOrThrow()
         attacker = createAttacker()
         startAttacker(attacker)
     }
@@ -84,13 +86,13 @@ abstract class MQSecurityTest : NodeBasedTest() {
 
     @Test
     fun `create queue for peer which has not been communicated with`() {
-        val bob = startNode("Bob").getOrThrow()
+        val bob = startNode(BOB.name).getOrThrow()
         assertAllQueueCreationAttacksFail("$PEERS_PREFIX${bob.info.legalIdentity.owningKey.toBase58String()}")
     }
 
     @Test
     fun `create queue for unknown peer`() {
-        val invalidPeerQueue = "$PEERS_PREFIX${generateKeyPair().public.composite.toBase58String()}"
+        val invalidPeerQueue = "$PEERS_PREFIX${generateKeyPair().public.toBase58String()}"
         assertAllQueueCreationAttacksFail(invalidPeerQueue)
     }
 
@@ -202,12 +204,12 @@ abstract class MQSecurityTest : NodeBasedTest() {
 
     fun assertSendAttackFails(address: String) {
         val message = attacker.createMessage()
-        assertEquals(true, attacker.producer.isBlockOnNonDurableSend())
+        assertEquals(true, attacker.producer.isBlockOnNonDurableSend)
         assertAttackFails(address, "SEND") {
             attacker.producer.send(address, message)
         }
-        assertEquals(0, message.getDeliveryCount())
-        assertEquals(0, message.getBodySize())
+        assertEquals(0, message.deliveryCount)
+        assertEquals(0, message.bodySize)
     }
 
     fun assertConsumeAttackFails(queue: String) {
@@ -227,7 +229,7 @@ abstract class MQSecurityTest : NodeBasedTest() {
     }
 
     private fun startBobAndCommunicateWithAlice(): Party {
-        val bob = startNode("Bob").getOrThrow()
+        val bob = startNode(BOB.name).getOrThrow()
         bob.services.registerFlowInitiator(SendFlow::class.java, ::ReceiveFlow)
         val bobParty = bob.info.legalIdentity
         // Perform a protocol exchange to force the peer queue to be created

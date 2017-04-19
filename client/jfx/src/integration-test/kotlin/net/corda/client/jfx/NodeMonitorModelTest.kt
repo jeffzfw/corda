@@ -6,6 +6,8 @@ import net.corda.core.bufferUntilSubscribed
 import net.corda.core.contracts.Amount
 import net.corda.core.contracts.DOLLARS
 import net.corda.core.contracts.USD
+import net.corda.core.crypto.isFulfilledBy
+import net.corda.core.crypto.keys
 import net.corda.core.flows.StateMachineRunId
 import net.corda.core.getOrThrow
 import net.corda.core.messaging.CordaRPCOps
@@ -18,6 +20,10 @@ import net.corda.core.node.services.StateMachineTransactionMapping
 import net.corda.core.node.services.Vault
 import net.corda.core.serialization.OpaqueBytes
 import net.corda.core.transactions.SignedTransaction
+import net.corda.core.utilities.ALICE
+import net.corda.core.utilities.BOB
+import net.corda.core.utilities.CHARLIE
+import net.corda.core.utilities.DUMMY_NOTARY
 import net.corda.flows.CashExitFlow
 import net.corda.flows.CashIssueFlow
 import net.corda.flows.CashPaymentFlow
@@ -52,8 +58,8 @@ class NodeMonitorModelTest : DriverBasedTest() {
                 startFlowPermission<CashPaymentFlow>(),
                 startFlowPermission<CashExitFlow>())
         )
-        val aliceNodeFuture = startNode("Alice", rpcUsers = listOf(cashUser))
-        val notaryNodeFuture = startNode("Notary", advertisedServices = setOf(ServiceInfo(SimpleNotaryService.type)))
+        val aliceNodeFuture = startNode(ALICE.name, rpcUsers = listOf(cashUser))
+        val notaryNodeFuture = startNode(DUMMY_NOTARY.name, advertisedServices = setOf(ServiceInfo(SimpleNotaryService.type)))
         val aliceNodeHandle = aliceNodeFuture.getOrThrow()
         val notaryNodeHandle = notaryNodeFuture.getOrThrow()
         aliceNode = aliceNodeHandle.nodeInfo
@@ -75,21 +81,21 @@ class NodeMonitorModelTest : DriverBasedTest() {
 
     @Test
     fun `network map update`() {
-        newNode("Bob")
-        newNode("Charlie")
+        newNode(BOB.name)
+        newNode(CHARLIE.name)
         networkMapUpdates.filter { !it.node.advertisedServices.any { it.info.type.isNotary() } }
                 .filter { !it.node.advertisedServices.any { it.info.type == NetworkMapService.type } }
                 .expectEvents(isStrict = false) {
                     sequence(
                             // TODO : Add test for remove when driver DSL support individual node shutdown.
                             expect { output: NetworkMapCache.MapChange ->
-                                require(output.node.legalIdentity.name == "Alice") { "Expecting : Alice, Actual : ${output.node.legalIdentity.name}" }
+                                require(output.node.legalIdentity.name == ALICE.name) { "Expecting : ${ALICE.name}, Actual : ${output.node.legalIdentity.name}" }
                             },
                             expect { output: NetworkMapCache.MapChange ->
-                                require(output.node.legalIdentity.name == "Bob") { "Expecting : Bob, Actual : ${output.node.legalIdentity.name}" }
+                                require(output.node.legalIdentity.name == BOB.name) { "Expecting : ${BOB.name}, Actual : ${output.node.legalIdentity.name}" }
                             },
                             expect { output: NetworkMapCache.MapChange ->
-                                require(output.node.legalIdentity.name == "Charlie") { "Expecting : Charlie, Actual : ${output.node.legalIdentity.name}" }
+                                require(output.node.legalIdentity.name == CHARLIE.name) { "Expecting : ${CHARLIE.name}, Actual : ${output.node.legalIdentity.name}" }
                             }
                     )
                 }
@@ -151,25 +157,25 @@ class NodeMonitorModelTest : DriverBasedTest() {
         transactions.expectEvents {
             sequence(
                     // ISSUE
-                    expect { tx ->
-                        require(tx.tx.inputs.isEmpty())
-                        require(tx.tx.outputs.size == 1)
-                        val signaturePubKeys = tx.sigs.map { it.by }.toSet()
+                    expect { stx ->
+                        require(stx.tx.inputs.isEmpty())
+                        require(stx.tx.outputs.size == 1)
+                        val signaturePubKeys = stx.sigs.map { it.by }.toSet()
                         // Only Alice signed
                         val aliceKey = aliceNode.legalIdentity.owningKey
                         require(signaturePubKeys.size <= aliceKey.keys.size)
                         require(aliceKey.isFulfilledBy(signaturePubKeys))
-                        issueTx = tx
+                        issueTx = stx
                     },
                     // MOVE
-                    expect { tx ->
-                        require(tx.tx.inputs.size == 1)
-                        require(tx.tx.outputs.size == 1)
-                        val signaturePubKeys = tx.sigs.map { it.by }.toSet()
+                    expect { stx ->
+                        require(stx.tx.inputs.size == 1)
+                        require(stx.tx.outputs.size == 1)
+                        val signaturePubKeys = stx.sigs.map { it.by }.toSet()
                         // Alice and Notary signed
                         require(aliceNode.legalIdentity.owningKey.isFulfilledBy(signaturePubKeys))
                         require(notaryNode.notaryIdentity.owningKey.isFulfilledBy(signaturePubKeys))
-                        moveTx = tx
+                        moveTx = stx
                     }
             )
         }

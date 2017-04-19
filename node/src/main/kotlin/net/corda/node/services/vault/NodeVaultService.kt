@@ -17,15 +17,14 @@ import net.corda.core.crypto.AbstractParty
 import net.corda.core.crypto.CompositeKey
 import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
+import net.corda.core.crypto.containsAny
+import net.corda.core.crypto.toBase58String
 import net.corda.core.node.ServiceHub
 import net.corda.core.node.services.StatesNotAvailableException
 import net.corda.core.node.services.Vault
 import net.corda.core.node.services.VaultService
 import net.corda.core.node.services.unconsumedStates
-import net.corda.core.serialization.SingletonSerializeAsToken
-import net.corda.core.serialization.deserialize
-import net.corda.core.serialization.serialize
-import net.corda.core.serialization.storageKryo
+import net.corda.core.serialization.*
 import net.corda.core.tee
 import net.corda.core.transactions.TransactionBuilder
 import net.corda.core.transactions.WireTransaction
@@ -61,21 +60,21 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         val log = loggerFor<NodeVaultService>()
 
         // Define composite primary key used in Requery Expression
-        val stateRefCompositeColumn : RowExpression = RowExpression.of(listOf(VaultStatesEntity.TX_ID, VaultStatesEntity.INDEX))
+        val stateRefCompositeColumn: RowExpression = RowExpression.of(listOf(VaultStatesEntity.TX_ID, VaultStatesEntity.INDEX))
     }
 
     val configuration = RequeryConfiguration(dataSourceProperties)
     val session = configuration.sessionForModel(Models.VAULT)
 
-    private val mutex = ThreadBox(content = object {
-
-        val _updatesPublisher = PublishSubject.create<Vault.Update>()
-        val _rawUpdatesPublisher = PublishSubject.create<Vault.Update>()
-        val _updatesInDbTx = _updatesPublisher.wrapWithDatabaseTransaction().asObservable()
+    private class InnerState {
+        val _updatesPublisher = PublishSubject.create<Vault.Update>()!!
+        val _rawUpdatesPublisher = PublishSubject.create<Vault.Update>()!!
+        val _updatesInDbTx = _updatesPublisher.wrapWithDatabaseTransaction().asObservable()!!
 
         // For use during publishing only.
         val updatesPublisher: rx.Observer<Vault.Update> get() = _updatesPublisher.bufferUntilDatabaseCommit().tee(_rawUpdatesPublisher)
-    })
+    }
+    private val mutex = ThreadBox(InnerState())
 
     private fun recordUpdate(update: Vault.Update): Vault.Update {
         if (update != Vault.NoUpdate) {
@@ -142,7 +141,7 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                     }
                     upsert(state ?: cashBalanceEntity)
                     val total = state?.amount ?: cashBalanceEntity.amount
-                    log.trace{"Updating Cash balance for $currency by ${cashBalanceEntity.amount} pennies (total: $total)"}
+                    log.trace { "Updating Cash balance for $currency by ${cashBalanceEntity.amount} pennies (total: $total)" }
                 }
             }
         }
@@ -177,24 +176,24 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         }
     }
 
-    override fun <T: ContractState> states(clazzes: Set<Class<T>>, statuses: EnumSet<Vault.StateStatus>, includeSoftLockedStates: Boolean): Iterable<StateAndRef<T>> {
+    override fun <T : ContractState> states(clazzes: Set<Class<T>>, statuses: EnumSet<Vault.StateStatus>, includeSoftLockedStates: Boolean): Iterable<StateAndRef<T>> {
         val stateAndRefs =
-            session.withTransaction(TransactionIsolation.REPEATABLE_READ) {
-                var query = select(VaultSchema.VaultStates::class)
-                                .where(VaultSchema.VaultStates::stateStatus `in` statuses)
-                // TODO: temporary fix to continue supporting track() function (until becomes Typed)
-                if (!clazzes.map {it.name}.contains(ContractState::class.java.name))
-                    query.and (VaultSchema.VaultStates::contractStateClassName `in` (clazzes.map { it.name }))
-                if (!includeSoftLockedStates)
-                    query.and(VaultSchema.VaultStates::lockId.isNull())
-                val iterator = query.get().iterator()
-                Sequence{iterator}
-                        .map { it ->
-                            val stateRef = StateRef(SecureHash.parse(it.txId), it.index)
-                            val state = it.contractState.deserialize<TransactionState<T>>(storageKryo())
-                            StateAndRef(state, stateRef)
-                        }
-            }
+                session.withTransaction(TransactionIsolation.REPEATABLE_READ) {
+                    val query = select(VaultSchema.VaultStates::class)
+                            .where(VaultSchema.VaultStates::stateStatus `in` statuses)
+                    // TODO: temporary fix to continue supporting track() function (until becomes Typed)
+                    if (!clazzes.map { it.name }.contains(ContractState::class.java.name))
+                        query.and(VaultSchema.VaultStates::contractStateClassName `in` (clazzes.map { it.name }))
+                    if (!includeSoftLockedStates)
+                        query.and(VaultSchema.VaultStates::lockId.isNull())
+                    val iterator = query.get().iterator()
+                    Sequence { iterator }
+                            .map { it ->
+                                val stateRef = StateRef(SecureHash.parse(it.txId), it.index)
+                                val state = it.contractState.deserialize<TransactionState<T>>(storageKryo())
+                                StateAndRef(state, stateRef)
+                            }
+                }
         return stateAndRefs.asIterable()
     }
 
@@ -292,14 +291,13 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                 val update = update(VaultStatesEntity::class)
                         .set(VaultStatesEntity.LOCK_ID, null)
                         .set(VaultStatesEntity.LOCK_UPDATE_TIME, services.clock.instant())
-                        .where (VaultStatesEntity.STATE_STATUS eq Vault.StateStatus.UNCONSUMED)
-                        .and (VaultStatesEntity.LOCK_ID eq lockId.toString()).get()
+                        .where(VaultStatesEntity.STATE_STATUS eq Vault.StateStatus.UNCONSUMED)
+                        .and(VaultStatesEntity.LOCK_ID eq lockId.toString()).get()
                 if (update.value() > 0) {
                     log.trace("Releasing ${update.value()} soft locked states for $lockId")
                 }
             }
-        }
-        else if (stateRefs.isNotEmpty()) {
+        } else if (stateRefs.isNotEmpty()) {
             try {
                 session.withTransaction(TransactionIsolation.REPEATABLE_READ) {
                     val updatedRows = update(VaultStatesEntity::class)
@@ -326,10 +324,12 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
     val spendLock: ReentrantLock = ReentrantLock()
 
     @Suspendable
-    override fun <T : ContractState> unconsumedStatesForSpending(amount: Amount<Currency>, onlyFromIssuerParties: Set<AbstractParty>?, notary: Party?, lockId: UUID): List<StateAndRef<T>> {
+    override fun <T : ContractState> unconsumedStatesForSpending(amount: Amount<Currency>, onlyFromIssuerParties: Set<AbstractParty>?, notary: Party?, lockId: UUID, withIssuerRefs: Set<OpaqueBytes>?): List<StateAndRef<T>> {
 
         val issuerKeysStr = onlyFromIssuerParties?.fold("") { left, right -> left + "('${right.owningKey.toBase58String()}')," }?.dropLast(1)
-        var stateAndRefs = mutableListOf<StateAndRef<T>>()
+        val issuerRefsStr = withIssuerRefs?.fold("") { left, right -> left + "('${right.bytes.toHexString()}')," }?.dropLast(1)
+
+        val stateAndRefs = mutableListOf<StateAndRef<T>>()
 
         // TODO: Need to provide a database provider independent means of performing this function.
         //       We are using an H2 specific means of selecting a minimum set of rows that match a request amount of coins:
@@ -359,7 +359,9 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
                             (if (notary != null)
                                 " AND vs.notary_key = '${notary.owningKey.toBase58String()}'" else "") +
                             (if (issuerKeysStr != null)
-                                " AND ccs.issuer_key IN $issuerKeysStr" else "")
+                                " AND ccs.issuer_key IN ($issuerKeysStr)" else "") +
+                            (if (issuerRefsStr != null)
+                                " AND ccs.issuer_ref IN ($issuerRefsStr)" else "")
 
                     // Retrieve spendable state refs
                     val rs = statement.executeQuery(selectJoin)
@@ -414,21 +416,21 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
 
     override fun <T : ContractState> softLockedStates(lockId: UUID?): List<StateAndRef<T>> {
         val stateAndRefs =
-            session.withTransaction(TransactionIsolation.REPEATABLE_READ) {
-                var query = select(VaultSchema.VaultStates::class)
-                        .where(VaultSchema.VaultStates::stateStatus eq Vault.StateStatus.UNCONSUMED)
-                        .and(VaultSchema.VaultStates::contractStateClassName eq Cash.State::class.java.name)
-                if (lockId != null)
-                    query.and(VaultSchema.VaultStates::lockId eq lockId)
-                else
-                    query.and(VaultSchema.VaultStates::lockId.notNull())
-                query.get()
-                        .map { it ->
-                            val stateRef = StateRef(SecureHash.parse(it.txId), it.index)
-                            val state = it.contractState.deserialize<TransactionState<T>>(storageKryo())
-                            StateAndRef(state, stateRef)
-                        }.toList()
-            }
+                session.withTransaction(TransactionIsolation.REPEATABLE_READ) {
+                    val query = select(VaultSchema.VaultStates::class)
+                            .where(VaultSchema.VaultStates::stateStatus eq Vault.StateStatus.UNCONSUMED)
+                            .and(VaultSchema.VaultStates::contractStateClassName eq Cash.State::class.java.name)
+                    if (lockId != null)
+                        query.and(VaultSchema.VaultStates::lockId eq lockId)
+                    else
+                        query.and(VaultSchema.VaultStates::lockId.notNull())
+                    query.get()
+                            .map { it ->
+                                val stateRef = StateRef(SecureHash.parse(it.txId), it.index)
+                                val state = it.contractState.deserialize<TransactionState<T>>(storageKryo())
+                                StateAndRef(state, stateRef)
+                            }.toList()
+                }
         return stateAndRefs
     }
 
@@ -442,8 +444,8 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
     @Suspendable
     override fun generateSpend(tx: TransactionBuilder,
                                amount: Amount<Currency>,
-                               to: CompositeKey,
-                               onlyFromParties: Set<AbstractParty>?): Pair<TransactionBuilder, List<CompositeKey>> {
+                               to: PublicKey,
+                               onlyFromParties: Set<AbstractParty>?): Pair<TransactionBuilder, List<PublicKey>> {
         // Discussion
         //
         // This code is analogous to the Wallet.send() set of methods in bitcoinj, and has the same general outline.
@@ -520,7 +522,7 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         return Pair(tx, keysUsed)
     }
 
-    private fun deriveState(txState: TransactionState<Cash.State>, amount: Amount<Issued<Currency>>, owner: CompositeKey)
+    private fun deriveState(txState: TransactionState<Cash.State>, amount: Amount<Issued<Currency>>, owner: PublicKey)
             = txState.copy(data = txState.data.copy(amount = amount, owner = owner))
 
     /**
@@ -530,9 +532,11 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
      * @param amount the amount to gather states up to.
      * @throws InsufficientBalanceException if there isn't enough value in the states to cover the requested amount.
      */
+    // TODO: Merge this with the function in [AbstractConserveAmount]
     @Throws(InsufficientBalanceException::class)
     private fun gatherCoins(acceptableCoins: Collection<StateAndRef<Cash.State>>,
                             amount: Amount<Currency>): Pair<ArrayList<StateAndRef<Cash.State>>, Amount<Currency>> {
+        require(amount.quantity > 0) { "Cannot gather zero coins" }
         val gathered = arrayListOf<StateAndRef<Cash.State>>()
         var gatheredAmount = Amount(0, amount.token)
         for (c in acceptableCoins) {
@@ -561,8 +565,8 @@ class NodeVaultService(private val services: ServiceHub, dataSourceProperties: P
         if (tx.inputs.isNotEmpty()) {
             session.withTransaction(TransactionIsolation.REPEATABLE_READ) {
                 val result = select(VaultStatesEntity::class).
-                             where (stateRefCompositeColumn.`in`(stateRefArgs(tx.inputs))).
-                             and (VaultSchema.VaultStates::stateStatus eq Vault.StateStatus.UNCONSUMED)
+                        where(stateRefCompositeColumn.`in`(stateRefArgs(tx.inputs))).
+                        and(VaultSchema.VaultStates::stateStatus eq Vault.StateStatus.UNCONSUMED)
                 result.get().forEach {
                     val txHash = SecureHash.parse(it.txId)
                     val index = it.index

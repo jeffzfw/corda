@@ -2,6 +2,8 @@ package net.corda.node
 
 import net.corda.contracts.asset.Cash
 import net.corda.core.contracts.*
+import net.corda.core.crypto.isFulfilledBy
+import net.corda.core.crypto.keys
 import net.corda.core.flows.StateMachineRunId
 import net.corda.core.messaging.StateMachineUpdate
 import net.corda.core.messaging.startFlow
@@ -16,7 +18,7 @@ import net.corda.node.internal.CordaRPCOpsImpl
 import net.corda.node.services.network.NetworkMapService
 import net.corda.node.services.startFlowPermission
 import net.corda.node.services.transactions.SimpleNotaryService
-import net.corda.node.utilities.databaseTransaction
+import net.corda.node.utilities.transaction
 import net.corda.nodeapi.CURRENT_RPC_USER
 import net.corda.nodeapi.PermissionException
 import net.corda.nodeapi.User
@@ -61,7 +63,7 @@ class CordaRPCOpsImplTest {
                 startFlowPermission<CashPaymentFlow>()
         )))
 
-        databaseTransaction(aliceNode.database) {
+        aliceNode.database.transaction {
             stateMachineUpdates = rpc.stateMachinesAndUpdates().second
             transactions = rpc.verifiedTransactions().second
             vaultUpdates = rpc.vaultAndUpdates().second
@@ -74,7 +76,7 @@ class CordaRPCOpsImplTest {
         val ref = OpaqueBytes(ByteArray(1) { 1 })
 
         // Check the monitoring service wallet is empty
-        databaseTransaction(aliceNode.database) {
+        aliceNode.database.transaction {
             assertFalse(aliceNode.services.vaultService.unconsumedStates<ContractState>().iterator().hasNext())
         }
 
@@ -154,20 +156,20 @@ class CordaRPCOpsImplTest {
         transactions.expectEvents {
             sequence(
                     // ISSUE
-                    expect { tx ->
-                        require(tx.tx.inputs.isEmpty())
-                        require(tx.tx.outputs.size == 1)
-                        val signaturePubKeys = tx.sigs.map { it.by }.toSet()
+                    expect { stx ->
+                        require(stx.tx.inputs.isEmpty())
+                        require(stx.tx.outputs.size == 1)
+                        val signaturePubKeys = stx.sigs.map { it.by }.toSet()
                         // Only Alice signed
                         val aliceKey = aliceNode.info.legalIdentity.owningKey
                         require(signaturePubKeys.size <= aliceKey.keys.size)
                         require(aliceKey.isFulfilledBy(signaturePubKeys))
                     },
                     // MOVE
-                    expect { tx ->
-                        require(tx.tx.inputs.size == 1)
-                        require(tx.tx.outputs.size == 1)
-                        val signaturePubKeys = tx.sigs.map { it.by }.toSet()
+                    expect { stx ->
+                        require(stx.tx.inputs.size == 1)
+                        require(stx.tx.outputs.size == 1)
+                        val signaturePubKeys = stx.sigs.map { it.by }.toSet()
                         // Alice and Notary signed
                         require(aliceNode.info.legalIdentity.owningKey.isFulfilledBy(signaturePubKeys))
                         require(notaryNode.info.notaryIdentity.owningKey.isFulfilledBy(signaturePubKeys))
@@ -179,7 +181,7 @@ class CordaRPCOpsImplTest {
             sequence(
                     // ISSUE
                     expect { update ->
-                        require(update.consumed.size == 0) { update.consumed.size }
+                        require(update.consumed.isEmpty()) { update.consumed.size }
                         require(update.produced.size == 1) { update.produced.size }
                     },
                     // MOVE

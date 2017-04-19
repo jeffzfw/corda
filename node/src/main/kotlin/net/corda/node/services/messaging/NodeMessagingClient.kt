@@ -3,7 +3,6 @@ package net.corda.node.services.messaging
 import com.google.common.net.HostAndPort
 import com.google.common.util.concurrent.ListenableFuture
 import net.corda.core.ThreadBox
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.messaging.*
 import net.corda.core.node.NodeVersionInfo
 import net.corda.core.node.services.PartyInfo
@@ -45,6 +44,7 @@ import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import javax.annotation.concurrent.ThreadSafe
+import java.security.PublicKey
 
 // TODO: Stop the wallet explorer and other clients from using this class and get rid of persistentInbox
 
@@ -70,7 +70,7 @@ import javax.annotation.concurrent.ThreadSafe
 class NodeMessagingClient(override val config: NodeConfiguration,
                           nodeVersionInfo: NodeVersionInfo,
                           val serverHostPort: HostAndPort,
-                          val myIdentity: CompositeKey?,
+                          val myIdentity: PublicKey?,
                           val nodeExecutor: AffinityExecutor,
                           val database: Database,
                           val networkMapRegistrationFuture: ListenableFuture<Unit>,
@@ -104,6 +104,7 @@ class NodeMessagingClient(override val config: NodeConfiguration,
         var rpcNotificationConsumer: ClientConsumer? = null
         var verificationResponseConsumer: ClientConsumer? = null
     }
+
     val verifierService = when (config.verifierType) {
         VerifierType.InMemory -> InMemoryTransactionVerifierService(numberOfWorkers = 4)
         VerifierType.OutOfProcess -> createOutOfProcessVerifierService()
@@ -152,6 +153,7 @@ class NodeMessagingClient(override val config: NodeConfiguration,
             // TODO Add broker CN to config for host verification in case the embedded broker isn't used
             val tcpTransport = ArtemisTcpTransport.tcpTransport(ConnectionDirection.Outbound(), serverHostPort, config)
             val locator = ActiveMQClient.createServerLocatorWithoutHA(tcpTransport)
+            locator.minLargeMessageSize = ArtemisMessagingServer.MAX_FILE_SIZE
             clientFactory = locator.createSessionFactory()
 
             // Login using the node username. The broker will authentiate us as its node (as opposed to another peer)
@@ -336,7 +338,7 @@ class NodeMessagingClient(override val config: NodeConfiguration,
             // Note that handlers may re-enter this class. We aren't holding any locks and methods like
             // start/run/stop have re-entrancy assertions at the top, so it is OK.
             nodeExecutor.fetchFrom {
-                databaseTransaction(database) {
+                database.transaction {
                     if (msg.uniqueMessageId in processedMessages) {
                         log.trace { "Discard duplicate message ${msg.uniqueMessageId} for ${msg.topicSession}" }
                     } else {
@@ -420,8 +422,10 @@ class NodeMessagingClient(override val config: NodeConfiguration,
                         putLongProperty(HDR_SCHEDULED_DELIVERY_TIME, System.currentTimeMillis() + amqDelay)
                     }
                 }
-                log.trace { "Send to: $mqAddress topic: ${message.topicSession.topic} " +
-                        "sessionID: ${message.topicSession.sessionID} uuid: ${message.uniqueMessageId}" }
+                log.trace {
+                    "Send to: $mqAddress topic: ${message.topicSession.topic} " +
+                            "sessionID: ${message.topicSession.sessionID} uuid: ${message.uniqueMessageId}"
+                }
                 producer!!.send(mqAddress, artemisMessage)
             }
         }
@@ -498,19 +502,19 @@ class NodeMessagingClient(override val config: NodeConfiguration,
 
     private fun createOutOfProcessVerifierService(): TransactionVerifierService {
         return object : OutOfProcessTransactionVerifierService(monitoringService) {
-                override fun sendRequest(nonce: Long, transaction: LedgerTransaction) {
-                    messagingExecutor.fetchFrom {
-                        state.locked {
-                            val message = session!!.createMessage(false)
-                            val request = VerifierApi.VerificationRequest(nonce, transaction, SimpleString(verifierResponseAddress))
-                            request.writeToClientMessage(message)
-                            producer!!.send(VERIFICATION_REQUESTS_QUEUE_NAME, message)
-                        }
+            override fun sendRequest(nonce: Long, transaction: LedgerTransaction) {
+                messagingExecutor.fetchFrom {
+                    state.locked {
+                        val message = session!!.createMessage(false)
+                        val request = VerifierApi.VerificationRequest(nonce, transaction, SimpleString(verifierResponseAddress))
+                        request.writeToClientMessage(message)
+                        producer!!.send(VERIFICATION_REQUESTS_QUEUE_NAME, message)
                     }
                 }
-
             }
+
         }
+    }
 
 
     override fun getAddressOfParty(partyInfo: PartyInfo): MessageRecipients {

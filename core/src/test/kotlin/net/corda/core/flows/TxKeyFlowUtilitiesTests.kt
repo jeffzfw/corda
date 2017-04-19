@@ -1,15 +1,14 @@
 package net.corda.core.flows
 
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.crypto.Party
+import net.corda.core.utilities.ALICE
+import net.corda.core.utilities.BOB
 import net.corda.core.utilities.DUMMY_NOTARY
-import net.corda.testing.ALICE
-import net.corda.testing.BOB
 import net.corda.testing.MOCK_IDENTITY_SERVICE
-import net.corda.testing.ledger
 import net.corda.testing.node.MockNetwork
 import org.junit.Before
 import org.junit.Test
+import java.security.PublicKey
 import kotlin.test.assertNotNull
 
 class TxKeyFlowUtilitiesTests {
@@ -30,7 +29,6 @@ class TxKeyFlowUtilitiesTests {
         val notaryNode = net.createNotaryNode(null, DUMMY_NOTARY.name)
         val aliceNode = net.createPartyNode(notaryNode.info.address, ALICE.name)
         val bobNode = net.createPartyNode(notaryNode.info.address, BOB.name)
-        val aliceKey: Party = aliceNode.services.myInfo.legalIdentity
         val bobKey: Party = bobNode.services.myInfo.legalIdentity
 
         // Run the flows
@@ -38,7 +36,7 @@ class TxKeyFlowUtilitiesTests {
         val requesterFlow = aliceNode.services.startFlow(TxKeyFlow.Requester(bobKey))
 
         // Get the results
-        val actual: CompositeKey = requesterFlow.resultFuture.get().first
+        val actual: PublicKey = requesterFlow.resultFuture.get().first
         assertNotNull(actual)
     }
 }

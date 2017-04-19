@@ -25,6 +25,7 @@ import net.corda.core.contracts.*
 import net.corda.core.crypto.AbstractParty
 import net.corda.core.crypto.AnonymousParty
 import net.corda.core.crypto.SecureHash
+import net.corda.core.crypto.toBase58String
 import net.corda.core.crypto.toStringShort
 import net.corda.core.node.NodeInfo
 import net.corda.explorer.AmountDiff
@@ -46,7 +47,7 @@ class TransactionViewer : CordaView("Transactions") {
     private val transactionViewTable by fxid<TableView<Transaction>>()
     private val matchingTransactionsLabel by fxid<Label>()
     // Inject data
-    private val transactions  by observableListReadOnly(TransactionDataModel::partiallyResolvedTransactions)
+    private val transactions by observableListReadOnly(TransactionDataModel::partiallyResolvedTransactions)
     private val reportingExchange by observableValue(ReportingCurrencyModel::reportingExchange)
     private val reportingCurrency by observableValue(ReportingCurrencyModel::reportingCurrency)
     private val myIdentity by observableValue(NetworkIdentityModel::myIdentity)
@@ -156,8 +157,8 @@ class TransactionViewer : CordaView("Transactions") {
     private fun ObservableList<StateAndRef<ContractState>>.getParties() = map { it.state.data.participants.map { getModel<NetworkIdentityModel>().lookup(it) } }
     private fun ObservableList<StateAndRef<ContractState>>.toText() = map { it.contract().javaClass.simpleName }.groupBy { it }.map { "${it.key} (${it.value.size})" }.joinToString()
 
-    private class TransactionWidget() : BorderPane() {
-        private val partiallyResolvedTransactions  by observableListReadOnly(TransactionDataModel::partiallyResolvedTransactions)
+    private class TransactionWidget : BorderPane() {
+        private val partiallyResolvedTransactions by observableListReadOnly(TransactionDataModel::partiallyResolvedTransactions)
 
         // TODO : Add a scrolling table to show latest transaction.
         // TODO : Add a chart to show types of transactions.

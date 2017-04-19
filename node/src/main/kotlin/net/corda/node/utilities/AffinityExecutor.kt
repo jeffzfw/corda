@@ -1,11 +1,13 @@
 package net.corda.node.utilities
 
-import com.google.common.util.concurrent.ListeningScheduledExecutorService
 import com.google.common.util.concurrent.SettableFuture
 import com.google.common.util.concurrent.Uninterruptibles
 import net.corda.core.utilities.loggerFor
 import java.util.*
-import java.util.concurrent.*
+import java.util.concurrent.CompletableFuture
+import java.util.concurrent.Executor
+import java.util.concurrent.LinkedBlockingQueue
+import java.util.concurrent.ScheduledThreadPoolExecutor
 import java.util.function.Supplier
 
 /**
@@ -108,8 +110,6 @@ interface AffinityExecutor : Executor {
             val runnable = Uninterruptibles.takeUninterruptibly(commandQ)
             runnable.run()
         }
-
-        val taskQueueSize: Int get() = commandQ.size
 
         override fun flush() {
             throw UnsupportedOperationException()

@@ -2,7 +2,6 @@ package net.corda.core.transactions
 
 import com.esotericsoftware.kryo.pool.KryoPool
 import net.corda.core.contracts.*
-import net.corda.core.crypto.CompositeKey
 import net.corda.core.crypto.MerkleTree
 import net.corda.core.crypto.Party
 import net.corda.core.crypto.SecureHash
@@ -14,7 +13,6 @@ import net.corda.core.serialization.p2PKryo
 import net.corda.core.serialization.serialize
 import net.corda.core.utilities.Emoji
 import java.security.PublicKey
-import java.util.*
 
 /**
  * A transaction ready for serialisation, without any signatures attached. A WireTransaction is usually wrapped
@@ -31,7 +29,7 @@ class WireTransaction(
         /** Ordered list of ([CommandData], [PublicKey]) pairs that instruct the contracts what to do. */
         override val commands: List<Command>,
         notary: Party?,
-        signers: List<CompositeKey>,
+        signers: List<PublicKey>,
         type: TransactionType,
         timestamp: Timestamp?
 ) : BaseTransaction(inputs, outputs, notary, signers, type, timestamp), TraversableTransaction {
@@ -88,7 +86,7 @@ class WireTransaction(
      */
     @Throws(AttachmentResolutionException::class, TransactionResolutionException::class)
     fun toLedgerTransaction(
-            resolveIdentity: (CompositeKey) -> Party?,
+            resolveIdentity: (PublicKey) -> Party?,
             resolveAttachment: (SecureHash) -> Attachment?,
             resolveStateRef: (StateRef) -> TransactionState<*>?
     ): LedgerTransaction {
@@ -123,7 +121,7 @@ class WireTransaction(
      * @returns FilteredLeaves used in PartialMerkleTree calculation and verification.
      */
     fun filterWithFun(filtering: (Any) -> Boolean): FilteredLeaves {
-        fun notNullFalse(elem: Any?): Any? = if(elem == null || !filtering(elem)) null else elem
+        fun notNullFalse(elem: Any?): Any? = if (elem == null || !filtering(elem)) null else elem
         return FilteredLeaves(
                 inputs.filter { filtering(it) },
                 attachments.filter { filtering(it) },

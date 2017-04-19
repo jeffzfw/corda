@@ -80,7 +80,7 @@ And a simple example CorDapp for you to explore basic concepts is available here
 You can clone these repos to your local machine by running the command ``git clone [repo URL]``.
 
 By default, these repos will be on the ``master`` branch. However, this is an unstable development branch. You should check 
-out the latest release tag instead by running ``git checkout release-M9.2``.
+out the latest release tag instead by running ``git checkout release-M10.1``.
 
 Opening Corda/CorDapps in IDEA
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -93,7 +93,7 @@ When opening a Corda project for the first time from the IDEA splash screen, ple
 and then import the Gradle project by clicking "Import Gradle project" in the popup bubble on the lower right-hand side of the screen. 
 If you instead pick "Import Project" on the splash screen, a bug in IDEA will cause Corda's pre-packaged run configurations to be erased. 
 
-If you see this warning too late, that's not a problem - just use ``git checkout .idea/runConfiguration`` or the version control tab in 
+If you see this warning too late, that's not a problem - just use ``git checkout .idea/runConfigurations`` or the version control tab in 
 IDEA to undelete the files.
 
 IDEA's build of the project may need to be resynced from time to time. This can be done from within IDEA by going to "View" -> "Tool Windows" -> "Gradle" 

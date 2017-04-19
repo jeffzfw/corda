@@ -129,7 +129,7 @@ data class TestTransactionDSLInterpreter private constructor(
         transactionBuilder.addAttachment(attachmentId)
     }
 
-    override fun _command(signers: List<CompositeKey>, commandData: CommandData) {
+    override fun _command(signers: List<PublicKey>, commandData: CommandData) {
         val command = Command(commandData, signers)
         transactionBuilder.addCommand(command)
     }
@@ -200,8 +200,8 @@ data class TestLedgerDSLInterpreter private constructor(
     internal inline fun <reified S : ContractState> resolveStateRef(stateRef: StateRef): TransactionState<S> {
         val transactionWithLocation =
                 transactionWithLocations[stateRef.txhash] ?:
-                nonVerifiedTransactionWithLocations[stateRef.txhash] ?:
-                throw TransactionResolutionException(stateRef.txhash)
+                        nonVerifiedTransactionWithLocations[stateRef.txhash] ?:
+                        throw TransactionResolutionException(stateRef.txhash)
         val output = transactionWithLocation.transaction.outputs[stateRef.index]
         return if (S::class.java.isAssignableFrom(output.data.javaClass)) @Suppress("UNCHECKED_CAST") {
             output as TransactionState<S>
@@ -335,7 +335,7 @@ fun signAll(transactionsToSign: List<WireTransaction>, extraKeys: List<KeyPair>)
     (ALL_TEST_KEYS + extraKeys).forEach {
         keyLookup[it.public] = it
     }
-    wtx.mustSign.keys.forEach {
+    wtx.mustSign.expandedCompositeKeys.forEach {
         val key = keyLookup[it] ?: throw IllegalArgumentException("Missing required key for ${it.toStringShort()}")
         signatures += key.signWithECDSA(wtx.id)
     }
