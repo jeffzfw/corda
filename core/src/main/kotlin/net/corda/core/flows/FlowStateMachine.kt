@@ -45,4 +45,5 @@ interface FlowStateMachine<R> {
     val logger: Logger
     val id: StateMachineRunId
     val resultFuture: ListenableFuture<R>
+    var hasSoftLockedStates: Boolean
 }
